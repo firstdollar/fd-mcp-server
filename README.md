@@ -35,27 +35,59 @@ npm run start        # Web UI
 
 ## MCP Client Configuration
 
-For Claude Desktop or Claude Code:
+The MCP server supports two authentication methods:
+
+### Option 1: API Key Authentication (Recommended for Claude Desktop)
+
+Use your Partner API credentials (clientId:clientSecret) as an API key. This is the recommended approach for headless clients like Claude Desktop that don't support browser-based OAuth flows.
+
+**Claude Desktop Configuration** (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
 
 ```json
 {
   "mcpServers": {
     "fd-partner-api": {
-      "url": "https://YOUR_CLOUD_RUN_URL/mcp",
+      "url": "https://mcp.firstdollar.com/mcp",
       "transport": "streamable-http",
       "headers": {
-        "Authorization": "Bearer YOUR_FIREBASE_TOKEN"
+        "X-API-Key": "your-client-id@partner.firstdollar.com:your-client-secret"
       }
     }
   }
 }
 ```
 
+**Environment-specific URLs:**
+- Production: `https://mcp.firstdollar.com/mcp`
+- Staging: `https://mcp.staging.firstdollar.com/mcp`
+- Development: `https://mcp.dev.firstdollar.com/mcp`
+
+### Option 2: Bearer Token Authentication (For Web UI)
+
+If you have a Firebase ID token (e.g., from the web UI authentication flow), you can use it directly:
+
+```json
+{
+  "mcpServers": {
+    "fd-partner-api": {
+      "url": "https://mcp.firstdollar.com/mcp",
+      "transport": "streamable-http",
+      "headers": {
+        "Authorization": "Bearer YOUR_FIREBASE_ID_TOKEN"
+      }
+    }
+  }
+}
+```
+
+Note: Firebase tokens expire after 1 hour. For long-running sessions, use API key authentication.
+
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PARTNER_API_URL` | Partner GraphQL API endpoint | `https://api.dev.firstdollar.com` |
+| `FD_BACKEND_API_URL` | Backend API for token exchange | `https://api.dev.firstdollar.com` |
 | `MCP_PORT` | MCP server port | `3001` (dev) / `8080` (prod) |
 | `MCP_HOST` | MCP server bind address | `0.0.0.0` |
 | `ANTHROPIC_API_KEY` | For chat functionality | - |

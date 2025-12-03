@@ -14,6 +14,7 @@ import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { Request, Response } from 'express';
 import { registerTools } from './tools.js';
+import { authenticateRequest, isAuthError, getTokenCacheSize } from './auth.js';
 
 const PORT = parseInt(process.env.MCP_PORT || '3001', 10);
 const HOST = process.env.MCP_HOST || '0.0.0.0';
@@ -23,6 +24,9 @@ const transports: Record<string, StreamableHTTPServerTransport> = {};
 
 // Store token per session for tool execution
 const sessionTokens: Record<string, string> = {};
+
+// Store auth method per session for logging
+const sessionAuthMethods: Record<string, 'bearer' | 'api-key'> = {};
 
 // Create Express app with MCP defaults (includes DNS rebinding protection for localhost)
 // Note: allowedHosts only accepts strings, so we need to list specific domains
@@ -49,16 +53,6 @@ const app = createMcpExpressApp({
     ...(process.env.K_SERVICE ? {} : { allowedHosts }),
 });
 
-/**
- * Extract Bearer token from Authorization header
- */
-function extractBearerToken(req: Request): string | null {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return null;
-    }
-    return authHeader.substring(7);
-}
 
 /**
  * Create and configure a new MCP server instance
@@ -80,22 +74,30 @@ function createMcpServer(token: string): McpServer {
  *
  * Handles both new session initialization and existing session messages.
  * Supports Streamable HTTP with optional SSE for streaming responses.
+ *
+ * Authentication methods:
+ * - Bearer token (Authorization: Bearer <token>) - for web UI
+ * - API key (X-API-Key: <key>) - for Claude Desktop and API clients
  */
 app.post('/mcp', async (req: Request, res: Response) => {
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
-    const token = extractBearerToken(req);
 
-    if (!token) {
+    // Authenticate the request
+    const authResult = await authenticateRequest(req);
+
+    if (isAuthError(authResult)) {
         res.status(401).json({
             jsonrpc: '2.0',
             error: {
-                code: -32000,
-                message: 'Unauthorized: Bearer token required',
+                code: authResult.code,
+                message: authResult.message,
             },
             id: null,
         });
         return;
     }
+
+    const { token, method: authMethod } = authResult;
 
     try {
         let transport: StreamableHTTPServerTransport;
@@ -109,10 +111,11 @@ app.post('/mcp', async (req: Request, res: Response) => {
                 sessionIdGenerator: () => randomUUID(),
                 enableJsonResponse: true,
                 onsessioninitialized: (newSessionId) => {
-                    // Store the transport and token once session is initialized
+                    // Store the transport, token, and auth method once session is initialized
                     transports[newSessionId] = transport;
                     sessionTokens[newSessionId] = token;
-                    console.log(`[MCP] New session initialized: ${newSessionId}`);
+                    sessionAuthMethods[newSessionId] = authMethod;
+                    console.log(`[MCP] New session initialized: ${newSessionId} (auth: ${authMethod})`);
                 },
             });
 
@@ -122,6 +125,7 @@ app.post('/mcp', async (req: Request, res: Response) => {
                 if (sid) {
                     delete transports[sid];
                     delete sessionTokens[sid];
+                    delete sessionAuthMethods[sid];
                     console.log(`[MCP] Session closed: ${sid}`);
                 }
             };
@@ -236,6 +240,7 @@ app.delete('/mcp', async (req: Request, res: Response) => {
         await transport.close();
         delete transports[sessionId];
         delete sessionTokens[sessionId];
+        delete sessionAuthMethods[sessionId];
         console.log(`[MCP] Session terminated by client: ${sessionId}`);
         res.status(204).send();
     } catch (error) {
@@ -262,6 +267,7 @@ app.get('/health', (_req: Request, res: Response) => {
         protocol: 'MCP',
         protocolVersion: '2025-06-18',
         activeSessions: Object.keys(transports).length,
+        cachedApiKeys: getTokenCacheSize(),
     });
 });
 
@@ -294,6 +300,7 @@ process.on('SIGINT', async () => {
             await transport.close();
             delete transports[sessionId];
             delete sessionTokens[sessionId];
+            delete sessionAuthMethods[sessionId];
             console.log(`[MCP] Closed session: ${sessionId}`);
         } catch (error) {
             console.error(`[MCP] Error closing session ${sessionId}:`, error);
