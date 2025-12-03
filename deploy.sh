@@ -16,8 +16,9 @@ PROJECT_ID="${1:-first-dollar-hackathon}"
 REGION="us-central1"
 SERVICE_NAME="fd-mcp-server"
 
-# Partner API URL (change for different environments)
+# API URLs (change for different environments)
 PARTNER_API_URL="${PARTNER_API_URL:-https://api.dev.firstdollar.com}"
+FD_BACKEND_API_URL="${FD_BACKEND_API_URL:-https://api.dev.firstdollar.com}"
 
 echo "=========================================="
 echo "Deploying MCP Server to Cloud Run"
@@ -47,7 +48,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --cpu 1 \
     --min-instances 0 \
     --max-instances 10 \
-    --set-env-vars "NODE_ENV=production,MCP_PORT=8080,MCP_HOST=0.0.0.0,PARTNER_API_URL=${PARTNER_API_URL}"
+    --set-env-vars "NODE_ENV=production,MCP_PORT=8080,MCP_HOST=0.0.0.0,PARTNER_API_URL=${PARTNER_API_URL},FD_BACKEND_API_URL=${FD_BACKEND_API_URL}"
 
 # Get the service URL
 SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" --region "${REGION}" --format 'value(status.url)')

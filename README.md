@@ -35,7 +35,9 @@ npm run start        # Web UI
 
 ## MCP Client Configuration
 
-The MCP server supports two authentication methods:
+The MCP server supports two authentication methods.
+
+> **Note:** The MCP server and token exchange endpoints are currently only available in development and staging environments. Production access is not yet enabled.
 
 ### Option 1: API Key Authentication (Recommended for Claude Desktop)
 
@@ -47,7 +49,7 @@ Use your Partner API credentials (clientId:clientSecret) as an API key. This is 
 {
   "mcpServers": {
     "fd-partner-api": {
-      "url": "https://mcp.firstdollar.com/mcp",
+      "url": "https://mcp.dev.firstdollar.com/mcp",
       "transport": "streamable-http",
       "headers": {
         "X-API-Key": "your-client-id@partner.firstdollar.com:your-client-secret"
@@ -58,9 +60,9 @@ Use your Partner API credentials (clientId:clientSecret) as an API key. This is 
 ```
 
 **Environment-specific URLs:**
-- Production: `https://mcp.firstdollar.com/mcp`
-- Staging: `https://mcp.staging.firstdollar.com/mcp`
 - Development: `https://mcp.dev.firstdollar.com/mcp`
+- Staging: `https://mcp.staging.firstdollar.com/mcp`
+- Production: Not yet available
 
 ### Option 2: Bearer Token Authentication (For Web UI)
 

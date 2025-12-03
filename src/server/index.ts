@@ -7,6 +7,10 @@
  * This server exposes Partner API operations as MCP tools for AI agents.
  */
 
+// Load environment variables from .env.local (for local development)
+import { config } from 'dotenv';
+config({ path: '.env.local' });
+
 import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
