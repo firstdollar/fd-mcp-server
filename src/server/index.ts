@@ -33,6 +33,8 @@ const app = createMcpExpressApp({
         'mcp.dev.firstdollar.com',
         'mcp.staging.firstdollar.com',
         'mcp.firstdollar.com',
+        // Cloud Run domains
+        /.*\.run\.app$/,
     ],
 });
 
