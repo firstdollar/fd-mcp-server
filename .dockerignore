@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+
+# Node modules (will be installed fresh in Docker)
+node_modules
+
+# Build outputs (will be built fresh)
+dist
+.next
+out
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea
+.vscode
+
+# OS
+.DS_Store
+
+# Documentation
+README.md
+CLAUDE.md
+*.md
+
+# CI/CD
+cloudbuild.yaml
+
+# Docker files (not needed in context)
+Dockerfile*
+.dockerignore
+deploy*.sh
