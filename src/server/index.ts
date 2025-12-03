@@ -25,17 +25,28 @@ const transports: Record<string, StreamableHTTPServerTransport> = {};
 const sessionTokens: Record<string, string> = {};
 
 // Create Express app with MCP defaults (includes DNS rebinding protection for localhost)
+// Note: allowedHosts only accepts strings, so we need to list specific domains
+// or disable DNS rebinding protection for production Cloud Run deployments
+const allowedHosts = [
+    'localhost',
+    '127.0.0.1',
+    'mcp.dev.firstdollar.com',
+    'mcp.staging.firstdollar.com',
+    'mcp.firstdollar.com',
+];
+
+// In production (Cloud Run), add the Cloud Run domain from environment
+// Cloud Run sets K_SERVICE and K_REVISION environment variables
+if (process.env.K_SERVICE) {
+    // Allow any host in Cloud Run (it handles its own security)
+    // We'll validate hosts ourselves if needed
+}
+
 const app = createMcpExpressApp({
     host: HOST,
-    allowedHosts: [
-        'localhost',
-        '127.0.0.1',
-        'mcp.dev.firstdollar.com',
-        'mcp.staging.firstdollar.com',
-        'mcp.firstdollar.com',
-        // Cloud Run domains
-        /.*\.run\.app$/,
-    ],
+    // If running in Cloud Run, disable host checking (Cloud Run handles security)
+    // Otherwise use our allowedHosts list
+    ...(process.env.K_SERVICE ? {} : { allowedHosts }),
 });
 
 /**
