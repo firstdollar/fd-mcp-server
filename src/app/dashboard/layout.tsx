@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
+import { PartnerSelector } from '@/components/partner-selector';
 import {
   LayoutDashboard,
   MessageSquare,
@@ -22,7 +23,7 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, loading, signOut } = useAuth();
+  const { user, loading, signOut, isFdAdmin, selectedPartner, loadingPartners } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -39,6 +40,9 @@ export default function DashboardLayout({
     );
   }
 
+  // Show partner selection prompt for FD Admins who haven't selected a partner
+  const needsPartnerSelection = isFdAdmin && !selectedPartner && !loadingPartners;
+
   return (
     <div className="min-h-screen bg-background">
       {/* Sidebar */}
@@ -48,6 +52,11 @@ export default function DashboardLayout({
             <Wrench className="h-4 w-4 text-white" />
           </div>
           <span className="font-semibold">FD MCP Server</span>
+        </div>
+
+        {/* Partner Selector */}
+        <div className="px-4 py-3 border-b">
+          <PartnerSelector />
         </div>
 
         <nav className="flex flex-col gap-1 p-4">
@@ -90,7 +99,19 @@ export default function DashboardLayout({
 
       {/* Main content */}
       <div className="pl-64">
-        <main className="p-8">{children}</main>
+        {needsPartnerSelection ? (
+          <main className="p-8">
+            <div className="max-w-md mx-auto mt-20 text-center">
+              <h2 className="text-2xl font-bold mb-4">Select a Partner</h2>
+              <p className="text-muted-foreground mb-6">
+                As an FD Admin, please select a partner from the dropdown in the sidebar
+                to continue using the MCP tools.
+              </p>
+            </div>
+          </main>
+        ) : (
+          <main className="p-8">{children}</main>
+        )}
       </div>
     </div>
   );
