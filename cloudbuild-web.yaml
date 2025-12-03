@@ -1,0 +1,15 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '$_IMAGE_NAME'
+      - '-f'
+      - 'Dockerfile.web'
+      - '.'
+
+images:
+  - '$_IMAGE_NAME'
+
+substitutions:
+  _IMAGE_NAME: 'us-central1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/fd-mcp-web:latest'

@@ -8,7 +8,6 @@
 #
 # Prerequisites:
 #   - gcloud CLI installed and authenticated
-#   - Docker installed (for local builds)
 #
 
 set -e
@@ -16,7 +15,6 @@ set -e
 PROJECT_ID="${1:-first-dollar-hackathon}"
 REGION="us-central1"
 SERVICE_NAME="fd-mcp-server"
-IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
 
 # Partner API URL (change for different environments)
 PARTNER_API_URL="${PARTNER_API_URL:-https://api.dev.firstdollar.com}"
@@ -37,21 +35,10 @@ cd "$(dirname "$0")"
 echo "Setting GCP project..."
 gcloud config set project "${PROJECT_ID}"
 
-# Build the Docker image
-echo "Building Docker image..."
-docker build \
-    -t "${IMAGE_NAME}:latest" \
-    -f Dockerfile \
-    .
-
-# Push to Container Registry
-echo "Pushing image to GCR..."
-docker push "${IMAGE_NAME}:latest"
-
-# Deploy to Cloud Run
-echo "Deploying to Cloud Run..."
+# Deploy to Cloud Run (builds and deploys in one step)
+echo "Building and deploying to Cloud Run..."
 gcloud run deploy "${SERVICE_NAME}" \
-    --image "${IMAGE_NAME}:latest" \
+    --source . \
     --region "${REGION}" \
     --platform managed \
     --allow-unauthenticated \

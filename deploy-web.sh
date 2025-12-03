@@ -12,7 +12,8 @@ set -e
 PROJECT_ID="${1:-first-dollar-hackathon}"
 REGION="us-central1"
 SERVICE_NAME="fd-mcp-web"
-IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
+REPO_NAME="cloud-run-source-deploy"
+IMAGE_NAME="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${SERVICE_NAME}"
 
 # Partner API URL for tool execution
 PARTNER_API_URL="${PARTNER_API_URL:-https://api.dev.firstdollar.com}"
@@ -33,16 +34,13 @@ cd "$(dirname "$0")"
 echo "Setting GCP project..."
 gcloud config set project "${PROJECT_ID}"
 
-# Build the Docker image
-echo "Building Docker image..."
-docker build \
-    -t "${IMAGE_NAME}:latest" \
-    -f Dockerfile.web \
+# Build and push using Cloud Build
+echo "Building and pushing image via Cloud Build..."
+gcloud builds submit \
+    --tag "${IMAGE_NAME}:latest" \
+    --config cloudbuild-web.yaml \
+    --timeout=600s \
     .
-
-# Push to Container Registry
-echo "Pushing image to GCR..."
-docker push "${IMAGE_NAME}:latest"
 
 # Deploy to Cloud Run
 echo "Deploying to Cloud Run..."
