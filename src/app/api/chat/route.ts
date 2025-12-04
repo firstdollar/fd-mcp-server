@@ -2,135 +2,129 @@ import { NextRequest, NextResponse } from 'next/server';
 import { selectToolWithClaude, generateResponseWithClaude } from '@/lib/claude-client';
 import { toolByName } from '@/lib/tools/definitions';
 
-// Mutations that require wrapping args in an input object
-const MUTATION_TOOLS = [
-    'create_organization',
-    'create_individual',
-    'update_individual',
-    'verify_individual',
-    'enroll_individual_in_benefit',
-];
-
 /**
- * Transform flat args into the nested structure expected by the GraphQL mutation
+ * Transform flat args into the nested structure expected by the Manager API GraphQL queries.
+ * Most Manager API queries expect an `input` object with specific fields.
+ * PageInput uses: first, after (not size, cursor)
  */
-function transformArgsForMutation(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
+function transformArgsForTool(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
     switch (toolName) {
-        case 'create_organization':
-            return { input: { name: args.name } };
-
-        case 'create_individual': {
-            const name: Record<string, unknown> = {
-                firstName: args.firstName,
-                lastName: args.lastName,
-            };
-            if (args.middleName) name.middleName = args.middleName;
-
-            const individual: Record<string, unknown> = { name };
-            if (args.email) individual.email = args.email;
-            if (args.phoneNumber) individual.phoneNumber = args.phoneNumber;
-            if (args.dateOfBirth) individual.dateOfBirth = args.dateOfBirth;
-            if (args.tin) individual.tin = args.tin;
-            if (args.language) individual.language = args.language;
-            if (args.externalUserId) individual.externalUserId = args.externalUserId;
-
-            if (args.addressLine1 || args.city || args.state || args.zip) {
-                const address: Record<string, unknown> = {};
-                if (args.addressLine1) address.addressLine1 = args.addressLine1;
-                if (args.addressLine2) address.addressLine2 = args.addressLine2;
-                if (args.city) address.city = args.city;
-                if (args.state) address.state = (args.state as string).toUpperCase();
-                if (args.zip) address.zip = args.zip;
-                if (args.country) address.country = args.country;
-                individual.address = address;
+        case 'list_organizations': {
+            const input: Record<string, unknown> = {};
+            if (args.organizationName) input.organizationName = args.organizationName;
+            if (args.organizationCode) input.organizationCode = args.organizationCode;
+            if (args.first || args.after) {
+                input.page = {
+                    ...(args.first ? { first: args.first } : {}),
+                    ...(args.after ? { after: args.after } : {}),
+                };
             }
-
-            return { input: { individual } };
-        }
-
-        case 'update_individual': {
-            const input: Record<string, unknown> = { id: args.id };
-
-            if (args.firstName || args.lastName || args.middleName) {
-                const name: Record<string, unknown> = {};
-                if (args.firstName) name.firstName = args.firstName;
-                if (args.lastName) name.lastName = args.lastName;
-                if (args.middleName) name.middleName = args.middleName;
-                input.name = name;
-            }
-
-            if (args.addressLine1 || args.addressLine2 || args.city || args.state || args.zip || args.country) {
-                const address: Record<string, unknown> = {};
-                if (args.addressLine1) address.addressLine1 = args.addressLine1;
-                if (args.addressLine2) address.addressLine2 = args.addressLine2;
-                if (args.city) address.city = args.city;
-                if (args.state) address.state = (args.state as string).toUpperCase();
-                if (args.zip) address.zip = args.zip;
-                if (args.country) address.country = args.country;
-                input.address = address;
-            }
-
-            if (args.email) input.email = args.email;
-            if (args.phoneNumber) input.phoneNumber = args.phoneNumber;
-            if (args.dateOfBirth) input.dateOfBirth = args.dateOfBirth;
-            if (args.tin) input.tin = args.tin;
-            if (args.language) input.language = args.language;
-
             return { input };
         }
 
-        case 'verify_individual': {
-            const idempotencyKey =
-                args.idempotencyKey ||
-                `verify-${args.individualId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        case 'get_organization': {
             return {
                 input: {
-                    individualId: args.individualId,
-                    idempotencyKey,
+                    organizationCode: args.organizationCode,
                 },
             };
         }
 
-        case 'enroll_individual_in_benefit': {
+        case 'list_organization_members': {
             const input: Record<string, unknown> = {
-                benefitId: args.benefitId,
-                individualId: args.individualId,
+                organizationCode: args.organizationCode,
             };
-
-            if (args.verificationId) input.verificationId = args.verificationId;
-            if (args.startDate) input.startDate = args.startDate;
-            if (args.endDate) input.endDate = args.endDate;
-
-            if (args.employeeInitialContributionAmount !== undefined) {
-                input.employeeInitialContributionAmount = {
-                    amount: Math.round((args.employeeInitialContributionAmount as number) * 100),
-                    currency: 'USD',
+            if (args.memberName) input.memberName = args.memberName;
+            if (args.filterByDisabledStatus !== undefined) input.filterByDisabledStatus = args.filterByDisabledStatus;
+            if (args.filterByEmploymentStatus) input.filterByEmploymentStatus = args.filterByEmploymentStatus;
+            if (args.first || args.after) {
+                input.page = {
+                    ...(args.first ? { first: args.first } : {}),
+                    ...(args.after ? { after: args.after } : {}),
                 };
             }
-            if (args.employerInitialContributionAmount !== undefined) {
-                input.employerInitialContributionAmount = {
-                    amount: Math.round((args.employerInitialContributionAmount as number) * 100),
-                    currency: 'USD',
-                };
-            }
-            if (args.employeeRecurringContributionAmount !== undefined) {
-                input.employeeRecurringContributionAmount = {
-                    amount: Math.round((args.employeeRecurringContributionAmount as number) * 100),
-                    currency: 'USD',
-                };
-            }
-            if (args.employerRecurringContributionAmount !== undefined) {
-                input.employerRecurringContributionAmount = {
-                    amount: Math.round((args.employerRecurringContributionAmount as number) * 100),
-                    currency: 'USD',
-                };
-            }
-
             return { input };
         }
 
+        case 'list_users': {
+            const input: Record<string, unknown> = {};
+            if (args.organizationCodes) input.organizationCodes = args.organizationCodes;
+            if (args.name) input.name = args.name;
+            if (args.uid) input.uid = args.uid;
+            if (args.externalUserId) input.externalUserId = args.externalUserId;
+            if (args.employeeId) input.employeeId = args.employeeId;
+            if (args.kycStatus) input.kycStatus = args.kycStatus;
+            if (args.first || args.after) {
+                input.page = {
+                    ...(args.first ? { first: args.first } : {}),
+                    ...(args.after ? { after: args.after } : {}),
+                };
+            }
+            return { input };
+        }
+
+        case 'get_user_details': {
+            const input: Record<string, unknown> = {
+                uid: args.uid,
+            };
+            if (args.includeInactiveOrganizationMemberships !== undefined) {
+                input.includeInactiveOrganizationMemberships = args.includeInactiveOrganizationMemberships;
+            }
+            return { input };
+        }
+
+        case 'list_benefits_programs': {
+            const input: Record<string, unknown> = {
+                organizationCode: args.organizationCode,
+            };
+            if (args.first || args.after) {
+                input.page = {
+                    ...(args.first ? { first: args.first } : {}),
+                    ...(args.after ? { after: args.after } : {}),
+                };
+            }
+            return { input };
+        }
+
+        case 'list_offering_templates': {
+            const input: Record<string, unknown> = {
+                partnerCode: args.partnerCode,
+            };
+            if (args.first || args.after) {
+                input.page = {
+                    ...(args.first ? { first: args.first } : {}),
+                    ...(args.after ? { after: args.after } : {}),
+                };
+            }
+            return { input };
+        }
+
+        case 'list_claims': {
+            const input: Record<string, unknown> = {};
+            if (args.organizationCodes) input.organizationCodes = args.organizationCodes;
+            if (args.partnerCodes) input.partnerCodes = args.partnerCodes;
+            if (args.statuses) input.statuses = args.statuses;
+            if (args.userIds) input.userIds = args.userIds;
+            if (args.userFullName) input.userFullName = args.userFullName;
+            if (args.offeringTypes) input.offeringTypes = args.offeringTypes;
+            if (args.startDate) input.startDate = args.startDate;
+            if (args.endDate) input.endDate = args.endDate;
+            if (args.first || args.after) {
+                input.page = {
+                    ...(args.first ? { first: args.first } : {}),
+                    ...(args.after ? { after: args.after } : {}),
+                };
+            }
+            return { input };
+        }
+
+        // These queries don't need input transformation
+        case 'get_current_partner':
+        case 'get_current_administrator':
+            return {};
+
         default:
-            return args;
+            return args || {};
     }
 }
 
@@ -156,20 +150,17 @@ export async function POST(request: NextRequest) {
         const tool = toolByName[toolSelection.tool];
         if (!tool) {
             return NextResponse.json({
-                response: `I couldn't find a suitable tool for your request. Available operations include listing/creating organizations, listing/creating/updating individuals, managing benefits programs, and enrolling individuals in benefits.`,
+                response: `I couldn't find a suitable tool for your request. Available operations include listing organizations, listing users, viewing benefits programs, claims, and more.`,
                 toolUsed: null,
             });
         }
 
-        // Step 2: Execute the tool
-        const isMutation = MUTATION_TOOLS.includes(toolSelection.tool);
-        const variables = isMutation
-            ? transformArgsForMutation(toolSelection.tool, toolSelection.params || {})
-            : toolSelection.params || {};
+        // Step 2: Execute the tool - transform args to match Manager API input structure
+        const variables = transformArgsForTool(toolSelection.tool, toolSelection.params || {});
 
         // Use Manager API for web UI - users authenticate with their own Firebase tokens
         // which have the correct permissions for their admin role (org admin, partner admin, etc.)
-        const managerApiUrl = process.env.MANAGER_API_URL || 'https://manager.dev.firstdollar.com';
+        const managerApiUrl = process.env.MANAGER_API_URL || 'https://manager.api.dev.firstdollar.com';
         const graphqlResponse = await fetch(`${managerApiUrl}/graphql`, {
             method: 'POST',
             headers: {

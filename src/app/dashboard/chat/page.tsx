@@ -25,15 +25,17 @@ export default function ChatPage() {
     {
       id: '1',
       role: 'assistant',
-      content: `Hello! I'm your First Dollar Partner API assistant. I can help you with organization setup, employee enrollment, benefits administration, and more.
+      content: `Hello! I'm your First Dollar Health Wallet Manager assistant. I can help you with organization management, user/member information, benefits administration, claims, and more.
 
 Here are some things you can ask me:
 - "List all organizations"
-- "Create an organization named Acme Corp"
-- "List individuals"
-- "Create an individual named John Doe"
-- "Show me the benefits programs"
-- "Ping the API"
+- "Show me the members of organization ACME"
+- "List all users"
+- "Get details for user abc123"
+- "Show me the benefits programs for organization ACME"
+- "List all claims"
+- "Who am I logged in as?"
+- "What partner am I connected to?"
 
 What would you like to do?`,
       timestamp: new Date(),
