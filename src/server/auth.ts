@@ -1,12 +1,8 @@
 /**
  * Authentication module for MCP Server
  *
- * Supports two authentication methods:
- * 1. Bearer token (Firebase ID token) - for Manager API (web UI users)
- * 2. API key (X-API-Key header) - for Partner API (Claude Desktop and API clients)
- *
+ * Supports API key authentication (X-API-Key header) for Claude Desktop and other API clients.
  * API keys are exchanged for Partner API tokens via the fd-backend token exchange endpoint.
- * Bearer tokens are passed directly to the Manager API.
  */
 
 import type { Request } from 'express';
@@ -16,26 +12,13 @@ const FD_BACKEND_API_URL = process.env.FD_BACKEND_API_URL || 'https://api.dev.fi
 export interface AuthResult {
     /** The API token to use for GraphQL queries */
     token: string;
-    /** The authentication method used */
-    method: 'bearer' | 'api-key';
-    /** The partner code (only available for API key auth) */
-    partnerCode?: string;
+    /** The partner code */
+    partnerCode: string;
 }
 
 export interface AuthError {
     code: number;
     message: string;
-}
-
-/**
- * Extract Bearer token from Authorization header
- */
-function extractBearerToken(req: Request): string | null {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return null;
-    }
-    return authHeader.substring(7);
 }
 
 /**
@@ -115,19 +98,17 @@ async function exchangeApiKeyForToken(
 }
 
 /**
- * Authenticate a request using API key (for Partner API / Claude Desktop)
+ * Authenticate a request using API key
  *
  * @param req - Express request object
  * @returns AuthResult on success, AuthError on failure
  */
-export async function authenticateApiKeyRequest(
-    req: Request,
-): Promise<AuthResult | AuthError> {
+export async function authenticateRequest(req: Request): Promise<AuthResult | AuthError> {
     const apiKey = extractApiKey(req);
     if (!apiKey) {
         return {
             code: -32000,
-            message: 'Unauthorized: X-API-Key header required for Partner API',
+            message: 'Unauthorized: X-API-Key header required',
         };
     }
 
@@ -135,7 +116,6 @@ export async function authenticateApiKeyRequest(
     if (result) {
         return {
             token: result.token,
-            method: 'api-key',
             partnerCode: result.partnerCode,
         };
     }
@@ -143,71 +123,6 @@ export async function authenticateApiKeyRequest(
     return {
         code: -32000,
         message: 'Invalid API key',
-    };
-}
-
-/**
- * Authenticate a request using Bearer token (for Manager API / web UI)
- *
- * @param req - Express request object
- * @returns AuthResult on success, AuthError on failure
- */
-export async function authenticateBearerRequest(
-    req: Request,
-): Promise<AuthResult | AuthError> {
-    const bearerToken = extractBearerToken(req);
-    if (!bearerToken) {
-        return {
-            code: -32000,
-            message: 'Unauthorized: Bearer token required for Manager API',
-        };
-    }
-
-    return {
-        token: bearerToken,
-        method: 'bearer',
-    };
-}
-
-/**
- * Authenticate a request using either Bearer token or API key (legacy, for backwards compatibility)
- *
- * @param req - Express request object
- * @returns AuthResult on success, AuthError on failure
- */
-export async function authenticateRequest(
-    req: Request,
-): Promise<AuthResult | AuthError> {
-    // Try Bearer token first (for web UI users)
-    const bearerToken = extractBearerToken(req);
-    if (bearerToken) {
-        return {
-            token: bearerToken,
-            method: 'bearer',
-        };
-    }
-
-    // Try API key (for Claude Desktop and other API clients)
-    const apiKey = extractApiKey(req);
-    if (apiKey) {
-        const result = await exchangeApiKeyForToken(apiKey);
-        if (result) {
-            return {
-                token: result.token,
-                method: 'api-key',
-                partnerCode: result.partnerCode,
-            };
-        }
-        return {
-            code: -32000,
-            message: 'Invalid API key',
-        };
-    }
-
-    // No authentication provided
-    return {
-        code: -32000,
-        message: 'Unauthorized: Bearer token or X-API-Key required',
     };
 }
 
