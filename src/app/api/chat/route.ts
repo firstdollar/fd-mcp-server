@@ -167,8 +167,10 @@ export async function POST(request: NextRequest) {
             ? transformArgsForMutation(toolSelection.tool, toolSelection.params || {})
             : toolSelection.params || {};
 
-        const apiUrl = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'https://api.dev.firstdollar.com';
-        const graphqlResponse = await fetch(`${apiUrl}/graphql`, {
+        // Use Manager API for web UI - users authenticate with their own Firebase tokens
+        // which have the correct permissions for their admin role (org admin, partner admin, etc.)
+        const managerApiUrl = process.env.MANAGER_API_URL || 'https://manager.dev.firstdollar.com';
+        const graphqlResponse = await fetch(`${managerApiUrl}/graphql`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

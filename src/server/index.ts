@@ -4,7 +4,9 @@
  * Express-based MCP server implementing the Streamable HTTP transport
  * per the MCP specification (2025-06-18).
  *
- * This server exposes Partner API operations as MCP tools for AI agents.
+ * This server exposes two MCP endpoints:
+ * - /mcp/partner - Partner API tools (API key auth for Claude Desktop)
+ * - /mcp/manager - Manager API tools (Bearer token auth for web UI)
  */
 
 // Load environment variables from .env.local (for local development)
@@ -18,23 +20,25 @@ import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { Request, Response } from 'express';
 import { registerTools } from './tools.js';
-import { authenticateRequest, isAuthError, getTokenCacheSize } from './auth.js';
+import { registerManagerTools } from './manager-tools.js';
+import {
+    authenticateApiKeyRequest,
+    authenticateBearerRequest,
+    isAuthError,
+    getTokenCacheSize,
+} from './auth.js';
 
 const PORT = parseInt(process.env.MCP_PORT || '3001', 10);
 const HOST = process.env.MCP_HOST || '0.0.0.0';
 
-// Store active transports by session ID
+// Session storage - shared across both endpoints
+// Prefix session IDs with endpoint type to avoid collisions
 const transports: Record<string, StreamableHTTPServerTransport> = {};
-
-// Store token per session for tool execution
 const sessionTokens: Record<string, string> = {};
-
-// Store auth method per session for logging
 const sessionAuthMethods: Record<string, 'bearer' | 'api-key'> = {};
+const sessionEndpointTypes: Record<string, 'partner' | 'manager'> = {};
 
-// Create Express app with MCP defaults (includes DNS rebinding protection for localhost)
-// Note: allowedHosts only accepts strings, so we need to list specific domains
-// or disable DNS rebinding protection for production Cloud Run deployments
+// Create Express app with MCP defaults
 const allowedHosts = [
     'localhost',
     '127.0.0.1',
@@ -43,234 +47,312 @@ const allowedHosts = [
     'mcp.firstdollar.com',
 ];
 
-// In production (Cloud Run), add the Cloud Run domain from environment
-// Cloud Run sets K_SERVICE and K_REVISION environment variables
-if (process.env.K_SERVICE) {
-    // Allow any host in Cloud Run (it handles its own security)
-    // We'll validate hosts ourselves if needed
-}
-
 const app = createMcpExpressApp({
     host: HOST,
     // If running in Cloud Run, disable host checking (Cloud Run handles security)
-    // Otherwise use our allowedHosts list
     ...(process.env.K_SERVICE ? {} : { allowedHosts }),
 });
 
-
 /**
- * Create and configure a new MCP server instance
+ * Create and configure a new MCP server instance for Partner API
  */
-function createMcpServer(token: string): McpServer {
+function createPartnerMcpServer(token: string): McpServer {
     const server = new McpServer({
-        name: 'fd-mcp-server',
+        name: 'fd-mcp-server-partner',
         version: '1.0.0',
     });
 
-    // Register all Partner API tools
+    // Register Partner API tools
     registerTools(server, token);
 
     return server;
 }
 
 /**
- * POST /mcp - Main MCP endpoint for JSON-RPC messages
- *
- * Handles both new session initialization and existing session messages.
- * Supports Streamable HTTP with optional SSE for streaming responses.
- *
- * Authentication methods:
- * - Bearer token (Authorization: Bearer <token>) - for web UI
- * - API key (X-API-Key: <key>) - for Claude Desktop and API clients
+ * Create and configure a new MCP server instance for Manager API
  */
-app.post('/mcp', async (req: Request, res: Response) => {
-    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+function createManagerMcpServer(token: string): McpServer {
+    const server = new McpServer({
+        name: 'fd-mcp-server-manager',
+        version: '1.0.0',
+    });
 
-    // Authenticate the request
-    const authResult = await authenticateRequest(req);
+    // Register Manager API tools
+    registerManagerTools(server, token);
 
-    if (isAuthError(authResult)) {
-        res.status(401).json({
-            jsonrpc: '2.0',
-            error: {
-                code: authResult.code,
-                message: authResult.message,
-            },
-            id: null,
-        });
-        return;
-    }
+    return server;
+}
 
-    const { token, method: authMethod } = authResult;
+/**
+ * Generic MCP POST handler factory
+ */
+function createMcpPostHandler(
+    endpointType: 'partner' | 'manager',
+    authenticateFn: (req: Request) => ReturnType<typeof authenticateApiKeyRequest>,
+    createServerFn: (token: string) => McpServer,
+) {
+    return async (req: Request, res: Response) => {
+        const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
-    try {
-        let transport: StreamableHTTPServerTransport;
+        // Authenticate the request
+        const authResult = await authenticateFn(req);
 
-        if (sessionId && transports[sessionId]) {
-            // Reuse existing transport for this session
-            transport = transports[sessionId];
-        } else if (!sessionId && isInitializeRequest(req.body)) {
-            // New session - create transport and server
-            transport = new StreamableHTTPServerTransport({
-                sessionIdGenerator: () => randomUUID(),
-                enableJsonResponse: true,
-                onsessioninitialized: (newSessionId) => {
-                    // Store the transport, token, and auth method once session is initialized
-                    transports[newSessionId] = transport;
-                    sessionTokens[newSessionId] = token;
-                    sessionAuthMethods[newSessionId] = authMethod;
-                    console.log(`[MCP] New session initialized: ${newSessionId} (auth: ${authMethod})`);
+        if (isAuthError(authResult)) {
+            res.status(401).json({
+                jsonrpc: '2.0',
+                error: {
+                    code: authResult.code,
+                    message: authResult.message,
                 },
+                id: null,
             });
+            return;
+        }
 
-            // Clean up when transport closes
-            transport.onclose = () => {
-                const sid = transport.sessionId;
-                if (sid) {
-                    delete transports[sid];
-                    delete sessionTokens[sid];
-                    delete sessionAuthMethods[sid];
-                    console.log(`[MCP] Session closed: ${sid}`);
+        const { token, method: authMethod } = authResult;
+
+        try {
+            let transport: StreamableHTTPServerTransport;
+
+            if (sessionId && transports[sessionId]) {
+                // Verify session is for the correct endpoint type
+                if (sessionEndpointTypes[sessionId] !== endpointType) {
+                    res.status(400).json({
+                        jsonrpc: '2.0',
+                        error: {
+                            code: -32000,
+                            message: `Session belongs to ${sessionEndpointTypes[sessionId]} endpoint, not ${endpointType}`,
+                        },
+                        id: null,
+                    });
+                    return;
                 }
-            };
+                // Reuse existing transport for this session
+                transport = transports[sessionId];
+            } else if (!sessionId && isInitializeRequest(req.body)) {
+                // New session - create transport and server
+                transport = new StreamableHTTPServerTransport({
+                    sessionIdGenerator: () => randomUUID(),
+                    enableJsonResponse: true,
+                    onsessioninitialized: (newSessionId) => {
+                        transports[newSessionId] = transport;
+                        sessionTokens[newSessionId] = token;
+                        sessionAuthMethods[newSessionId] = authMethod;
+                        sessionEndpointTypes[newSessionId] = endpointType;
+                        console.log(
+                            `[MCP ${endpointType}] New session initialized: ${newSessionId} (auth: ${authMethod})`,
+                        );
+                    },
+                });
 
-            // Create and connect MCP server
-            const server = createMcpServer(token);
-            await server.connect(transport);
-        } else if (sessionId && !transports[sessionId]) {
-            // Session expired or invalid
+                // Clean up when transport closes
+                transport.onclose = () => {
+                    const sid = transport.sessionId;
+                    if (sid) {
+                        delete transports[sid];
+                        delete sessionTokens[sid];
+                        delete sessionAuthMethods[sid];
+                        delete sessionEndpointTypes[sid];
+                        console.log(`[MCP ${endpointType}] Session closed: ${sid}`);
+                    }
+                };
+
+                // Create and connect MCP server
+                const server = createServerFn(token);
+                await server.connect(transport);
+            } else if (sessionId && !transports[sessionId]) {
+                res.status(400).json({
+                    jsonrpc: '2.0',
+                    error: {
+                        code: -32000,
+                        message: 'Invalid or expired session',
+                    },
+                    id: null,
+                });
+                return;
+            } else {
+                res.status(400).json({
+                    jsonrpc: '2.0',
+                    error: {
+                        code: -32600,
+                        message: 'Invalid request: session ID required or initialize first',
+                    },
+                    id: null,
+                });
+                return;
+            }
+
+            await transport.handleRequest(req, res, req.body);
+        } catch (error) {
+            console.error(`[MCP ${endpointType}] Error handling request:`, error);
+            if (!res.headersSent) {
+                res.status(500).json({
+                    jsonrpc: '2.0',
+                    error: {
+                        code: -32603,
+                        message: error instanceof Error ? error.message : 'Internal server error',
+                    },
+                    id: null,
+                });
+            }
+        }
+    };
+}
+
+/**
+ * Generic MCP GET handler (SSE) factory
+ */
+function createMcpGetHandler(endpointType: 'partner' | 'manager') {
+    return async (req: Request, res: Response) => {
+        const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+        if (!sessionId || !transports[sessionId]) {
             res.status(400).json({
                 jsonrpc: '2.0',
                 error: {
                     code: -32000,
-                    message: 'Invalid or expired session',
+                    message: 'Invalid or missing session ID',
                 },
                 id: null,
             });
             return;
-        } else {
-            // No session ID and not an initialize request
+        }
+
+        // Verify session is for the correct endpoint type
+        if (sessionEndpointTypes[sessionId] !== endpointType) {
             res.status(400).json({
                 jsonrpc: '2.0',
                 error: {
-                    code: -32600,
-                    message: 'Invalid request: session ID required or initialize first',
+                    code: -32000,
+                    message: `Session belongs to ${sessionEndpointTypes[sessionId]} endpoint, not ${endpointType}`,
                 },
                 id: null,
             });
             return;
         }
 
-        // Handle the request through the transport
-        await transport.handleRequest(req, res, req.body);
-    } catch (error) {
-        console.error('[MCP] Error handling request:', error);
-        if (!res.headersSent) {
+        const transport = transports[sessionId];
+
+        try {
+            await transport.handleRequest(req, res);
+        } catch (error) {
+            console.error(`[MCP ${endpointType}] Error handling SSE request:`, error);
+            if (!res.headersSent) {
+                res.status(500).json({
+                    jsonrpc: '2.0',
+                    error: {
+                        code: -32603,
+                        message: 'Internal server error',
+                    },
+                    id: null,
+                });
+            }
+        }
+    };
+}
+
+/**
+ * Generic MCP DELETE handler factory
+ */
+function createMcpDeleteHandler(endpointType: 'partner' | 'manager') {
+    return async (req: Request, res: Response) => {
+        const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+        if (!sessionId || !transports[sessionId]) {
+            res.status(404).json({
+                jsonrpc: '2.0',
+                error: {
+                    code: -32000,
+                    message: 'Session not found',
+                },
+                id: null,
+            });
+            return;
+        }
+
+        // Verify session is for the correct endpoint type
+        if (sessionEndpointTypes[sessionId] !== endpointType) {
+            res.status(400).json({
+                jsonrpc: '2.0',
+                error: {
+                    code: -32000,
+                    message: `Session belongs to ${sessionEndpointTypes[sessionId]} endpoint, not ${endpointType}`,
+                },
+                id: null,
+            });
+            return;
+        }
+
+        const transport = transports[sessionId];
+
+        try {
+            await transport.close();
+            delete transports[sessionId];
+            delete sessionTokens[sessionId];
+            delete sessionAuthMethods[sessionId];
+            delete sessionEndpointTypes[sessionId];
+            console.log(`[MCP ${endpointType}] Session terminated by client: ${sessionId}`);
+            res.status(204).send();
+        } catch (error) {
+            console.error(`[MCP ${endpointType}] Error closing session:`, error);
             res.status(500).json({
                 jsonrpc: '2.0',
                 error: {
                     code: -32603,
-                    message: error instanceof Error ? error.message : 'Internal server error',
+                    message: 'Error closing session',
                 },
                 id: null,
             });
         }
-    }
-});
+    };
+}
 
-/**
- * GET /mcp - SSE endpoint for server-to-client streaming
- *
- * Allows clients to receive server-sent events for long-running operations.
- * Supports resumability via Last-Event-ID header.
- */
-app.get('/mcp', async (req: Request, res: Response) => {
-    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+// ============================================================================
+// Partner API MCP Endpoints (/mcp/partner)
+// Uses API key authentication for Claude Desktop and other headless clients
+// ============================================================================
 
-    if (!sessionId || !transports[sessionId]) {
-        res.status(400).json({
-            jsonrpc: '2.0',
-            error: {
-                code: -32000,
-                message: 'Invalid or missing session ID',
-            },
-            id: null,
-        });
-        return;
-    }
+app.post(
+    '/mcp/partner',
+    createMcpPostHandler('partner', authenticateApiKeyRequest, createPartnerMcpServer),
+);
+app.get('/mcp/partner', createMcpGetHandler('partner'));
+app.delete('/mcp/partner', createMcpDeleteHandler('partner'));
 
-    const transport = transports[sessionId];
+// ============================================================================
+// Manager API MCP Endpoints (/mcp/manager)
+// Uses Bearer token authentication for web UI users
+// ============================================================================
 
-    try {
-        await transport.handleRequest(req, res);
-    } catch (error) {
-        console.error('[MCP] Error handling SSE request:', error);
-        if (!res.headersSent) {
-            res.status(500).json({
-                jsonrpc: '2.0',
-                error: {
-                    code: -32603,
-                    message: 'Internal server error',
-                },
-                id: null,
-            });
-        }
-    }
-});
+app.post(
+    '/mcp/manager',
+    createMcpPostHandler('manager', authenticateBearerRequest, createManagerMcpServer),
+);
+app.get('/mcp/manager', createMcpGetHandler('manager'));
+app.delete('/mcp/manager', createMcpDeleteHandler('manager'));
 
-/**
- * DELETE /mcp - Session termination endpoint
- *
- * Allows clients to explicitly close their session per MCP specification.
- */
-app.delete('/mcp', async (req: Request, res: Response) => {
-    const sessionId = req.headers['mcp-session-id'] as string | undefined;
-
-    if (!sessionId || !transports[sessionId]) {
-        res.status(404).json({
-            jsonrpc: '2.0',
-            error: {
-                code: -32000,
-                message: 'Session not found',
-            },
-            id: null,
-        });
-        return;
-    }
-
-    const transport = transports[sessionId];
-
-    try {
-        await transport.close();
-        delete transports[sessionId];
-        delete sessionTokens[sessionId];
-        delete sessionAuthMethods[sessionId];
-        console.log(`[MCP] Session terminated by client: ${sessionId}`);
-        res.status(204).send();
-    } catch (error) {
-        console.error('[MCP] Error closing session:', error);
-        res.status(500).json({
-            jsonrpc: '2.0',
-            error: {
-                code: -32603,
-                message: 'Error closing session',
-            },
-            id: null,
-        });
-    }
-});
+// ============================================================================
+// Utility Endpoints
+// ============================================================================
 
 /**
  * GET /health - Health check endpoint
  */
 app.get('/health', (_req: Request, res: Response) => {
+    const partnerSessions = Object.values(sessionEndpointTypes).filter((t) => t === 'partner').length;
+    const managerSessions = Object.values(sessionEndpointTypes).filter((t) => t === 'manager').length;
+
     res.json({
         status: 'healthy',
         server: 'fd-mcp-server',
         version: '1.0.0',
         protocol: 'MCP',
         protocolVersion: '2025-06-18',
-        activeSessions: Object.keys(transports).length,
+        sessions: {
+            total: Object.keys(transports).length,
+            partner: partnerSessions,
+            manager: managerSessions,
+        },
         cachedApiKeys: getTokenCacheSize(),
     });
 });
@@ -282,29 +364,41 @@ app.get('/', (_req: Request, res: Response) => {
     res.json({
         name: 'fd-mcp-server',
         version: '1.0.0',
-        description: 'First Dollar Partner API MCP Server',
+        description: 'First Dollar MCP Server',
         protocol: 'MCP',
         protocolVersion: '2025-06-18',
         transport: 'Streamable HTTP',
         endpoints: {
-            mcp: '/mcp',
+            partner: {
+                path: '/mcp/partner',
+                description: 'Partner API MCP endpoint (API key auth)',
+                methods: ['POST', 'GET', 'DELETE'],
+            },
+            manager: {
+                path: '/mcp/manager',
+                description: 'Manager API MCP endpoint (Bearer token auth)',
+                methods: ['POST', 'GET', 'DELETE'],
+            },
             health: '/health',
         },
         documentation: 'https://developer.firstdollar.com',
     });
 });
 
-// Graceful shutdown
+// ============================================================================
+// Graceful Shutdown
+// ============================================================================
+
 process.on('SIGINT', async () => {
     console.log('\n[MCP] Shutting down...');
 
-    // Close all active transports
     for (const [sessionId, transport] of Object.entries(transports)) {
         try {
             await transport.close();
             delete transports[sessionId];
             delete sessionTokens[sessionId];
             delete sessionAuthMethods[sessionId];
+            delete sessionEndpointTypes[sessionId];
             console.log(`[MCP] Closed session: ${sessionId}`);
         } catch (error) {
             console.error(`[MCP] Error closing session ${sessionId}:`, error);
@@ -314,7 +408,10 @@ process.on('SIGINT', async () => {
     process.exit(0);
 });
 
-// Start server
+// ============================================================================
+// Start Server
+// ============================================================================
+
 app.listen(PORT, HOST, () => {
     console.log(`
 ╔═══════════════════════════════════════════════════════════╗
@@ -327,10 +424,9 @@ app.listen(PORT, HOST, () => {
 ║  Version:   2025-06-18                                    ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  Endpoints:                                               ║
-║    POST   /mcp     - JSON-RPC messages                    ║
-║    GET    /mcp     - SSE streaming                        ║
-║    DELETE /mcp     - Session termination                  ║
-║    GET    /health  - Health check                         ║
+║    /mcp/partner  - Partner API (API key auth)             ║
+║    /mcp/manager  - Manager API (Bearer token auth)        ║
+║    /health       - Health check                           ║
 ╚═══════════════════════════════════════════════════════════╝
     `);
 });

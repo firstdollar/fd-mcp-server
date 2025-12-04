@@ -162,10 +162,10 @@ export async function POST(request: NextRequest) {
         const isMutation = MUTATION_TOOLS.includes(toolName);
         const variables = isMutation ? transformArgsForMutation(toolName, args || {}) : args || {};
 
-        // Execute the GraphQL query against Partner API
-        // Partner API is at /graphql on the API app (not manager)
-        const apiUrl = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'https://api.dev.firstdollar.com';
-        const response = await fetch(`${apiUrl}/graphql`, {
+        // Execute the GraphQL query against Manager API
+        // Web UI users authenticate with their own Firebase tokens via Manager API
+        const managerApiUrl = process.env.MANAGER_API_URL || 'https://manager.dev.firstdollar.com';
+        const response = await fetch(`${managerApiUrl}/graphql`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
