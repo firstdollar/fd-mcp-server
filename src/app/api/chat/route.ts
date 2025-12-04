@@ -123,6 +123,64 @@ function transformArgsForTool(toolName: string, args: Record<string, unknown>): 
         case 'get_current_administrator':
             return {};
 
+        // New mutation tools
+        case 'create_or_return_root_benefits_program': {
+            return {
+                input: {
+                    organizationCode: args.organizationCode,
+                },
+            };
+        }
+
+        case 'create_benefits_offering': {
+            return {
+                input: {
+                    benefitsProgramId: args.benefitsProgramId,
+                    offering: {
+                        template: args.templateId,
+                        name: args.name,
+                        description: args.description,
+                        dates: {
+                            startDate: args.startDate,
+                            ...(args.endDate ? { endDate: args.endDate } : {}),
+                        },
+                        ...(args.internalName ? { internalName: args.internalName } : {}),
+                        // Configuration is required but we use minimal defaults from template
+                        configuration: {},
+                    },
+                },
+            };
+        }
+
+        case 'bulk_create_individuals': {
+            return {
+                input: {
+                    organizationUlid: args.organizationUlid,
+                    individuals: args.individuals,
+                },
+            };
+        }
+
+        case 'bulk_enroll_in_offerings': {
+            // This mutation takes the array directly, not wrapped in input
+            return {
+                input: args.enrollments,
+            };
+        }
+
+        case 'unenroll_participant_from_offerings': {
+            return {
+                input: {
+                    participantUid: args.participantUid,
+                    offeringIds: args.offeringIds,
+                    ...(args.effectiveAt ? { effectiveAt: args.effectiveAt } : {}),
+                    ...(args.sendEmailConfirmation !== undefined
+                        ? { sendEmailConfirmation: args.sendEmailConfirmation }
+                        : {}),
+                },
+            };
+        }
+
         default:
             return args || {};
     }

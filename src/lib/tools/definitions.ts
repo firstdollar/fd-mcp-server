@@ -434,6 +434,224 @@ export const getCurrentAdministrator: ToolDefinition = {
     resultPath: 'currentAdministratorDetails',
 };
 
+// Create or Return Root Benefits Program - using Manager API schema
+// partnerCreateOrReturnRootBenefitsProgram creates or returns the root benefits program for an organization
+export const createOrReturnRootBenefitsProgram: ToolDefinition = {
+    name: 'create_or_return_root_benefits_program',
+    description: 'Create or return the root benefits program for an organization. If a program already exists, it returns the existing one.',
+    category: 'Benefits',
+    inputSchema: z.object({
+        organizationCode: z.string().describe('The organization short code'),
+    }),
+    graphqlQuery: `
+    mutation CreateOrReturnRootBenefitsProgram($input: PartnerCreateOrReturnRootBenefitsProgramInput!) {
+      partnerCreateOrReturnRootBenefitsProgram(input: $input) {
+        program {
+          id
+          offerings {
+            cursor
+            node {
+              id
+              name
+              type
+              status
+              startDate
+              endDate
+            }
+          }
+        }
+      }
+    }
+  `,
+    resultPath: 'partnerCreateOrReturnRootBenefitsProgram',
+};
+
+// Create Benefits Offering - using Manager API schema
+// partnerCreateBenefitsOffering creates a new benefits offering within a program
+export const createBenefitsOffering: ToolDefinition = {
+    name: 'create_benefits_offering',
+    description: 'Create a new benefits offering within a benefits program for an organization',
+    category: 'Benefits',
+    inputSchema: z.object({
+        benefitsProgramId: z.string().describe('The public ID of the benefits program'),
+        templateId: z.string().describe('The public ID of the offering template to use'),
+        name: z.string().describe('The user-displayable name for the offering'),
+        description: z.string().describe('A description of the offering'),
+        startDate: z.string().describe('The start date (YYYY-MM-DD format)'),
+        endDate: z.string().optional().describe('The end date (YYYY-MM-DD format, optional)'),
+        internalName: z.string().optional().describe('Internal name for the offering (optional)'),
+    }),
+    graphqlQuery: `
+    mutation CreateBenefitsOffering($input: CreateBenefitsOfferingInput!) {
+      partnerCreateBenefitsOffering(input: $input) {
+        offering {
+          id
+          name
+          description
+          type
+          status
+          startDate
+          endDate
+        }
+        program {
+          id
+        }
+      }
+    }
+  `,
+    resultPath: 'partnerCreateBenefitsOffering',
+};
+
+// Bulk Create Individuals - using Manager API schema
+// bulkCreateIndividuals creates multiple individuals in an organization
+export const bulkCreateIndividuals: ToolDefinition = {
+    name: 'bulk_create_individuals',
+    description: 'Create multiple individuals (members) in an organization',
+    category: 'Users',
+    inputSchema: z.object({
+        organizationUlid: z.string().describe('The public ULID of the organization'),
+        individuals: z
+            .array(
+                z.object({
+                    email: z.string().describe('The individual email address (required)'),
+                    name: z
+                        .object({
+                            firstName: z.string().describe('First name'),
+                            lastName: z.string().describe('Last name'),
+                            middleName: z.string().optional().describe('Middle name (optional)'),
+                        })
+                        .describe('The individual name'),
+                    dateOfBirth: z.string().optional().describe('Date of birth (YYYY-MM-DD format)'),
+                    phoneNumber: z.string().optional().describe('Phone number'),
+                    tin: z.string().optional().describe('Tax Identification Number (SSN)'),
+                    externalUserId: z.string().optional().describe('External user ID from your system'),
+                    language: z.string().optional().describe('Language preference (e.g., en, es)'),
+                    address: z
+                        .object({
+                            addressLine1: z.string().describe('Street address line 1'),
+                            addressLine2: z.string().optional().describe('Street address line 2'),
+                            city: z.string().describe('City'),
+                            state: z.string().describe('State code (e.g., CA, NY)'),
+                            zip: z.string().describe('ZIP code'),
+                            country: z.string().optional().describe('Country code (default: US)'),
+                        })
+                        .optional()
+                        .describe('Primary address'),
+                    mailingAddress: z
+                        .object({
+                            addressLine1: z.string().describe('Street address line 1'),
+                            addressLine2: z.string().optional().describe('Street address line 2'),
+                            city: z.string().describe('City'),
+                            state: z.string().describe('State code (e.g., CA, NY)'),
+                            zip: z.string().describe('ZIP code'),
+                            country: z.string().optional().describe('Country code (default: US)'),
+                        })
+                        .optional()
+                        .describe('Mailing address (if different from primary)'),
+                }),
+            )
+            .describe('Array of individuals to create'),
+    }),
+    graphqlQuery: `
+    mutation BulkCreateIndividuals($input: BulkCreateIndividualsInput!) {
+      bulkCreateIndividuals(input: $input) {
+        ... on BulkCreateIndividualsSuccess {
+          success
+          uid
+        }
+        ... on BulkCreateIndividualsFailure {
+          success
+          message
+        }
+      }
+    }
+  `,
+    resultPath: 'bulkCreateIndividuals',
+};
+
+// Bulk Enroll in Offerings - using Manager API schema
+// bulkEnrollInOfferings enrolls individuals in benefit offerings
+export const bulkEnrollInOfferings: ToolDefinition = {
+    name: 'bulk_enroll_in_offerings',
+    description: 'Enroll one or more individuals in benefit offerings',
+    category: 'Enrollments',
+    inputSchema: z.object({
+        enrollments: z
+            .array(
+                z.object({
+                    externalUserId: z.string().describe('External user ID of the individual to enroll'),
+                    offeringId: z.string().describe('The public ID of the offering to enroll in'),
+                    enrollmentStartDate: z.string().optional().describe('Enrollment start date (ISO datetime)'),
+                    enrollmentEndDate: z.string().optional().describe('Enrollment end date (ISO datetime)'),
+                    coverageType: z
+                        .enum(['INDIVIDUAL', 'FAMILY', 'NONE'])
+                        .optional()
+                        .describe('Health insurance coverage type for HSA limits'),
+                    employeeInitialContributionAmount: z
+                        .string()
+                        .optional()
+                        .describe('Initial contribution from employee (in cents as string)'),
+                    employerInitialContributionAmount: z
+                        .string()
+                        .optional()
+                        .describe('Initial contribution from employer (in cents as string)'),
+                    employeeRecurringContributionAmount: z
+                        .string()
+                        .optional()
+                        .describe('Recurring contribution from employee (in cents as string)'),
+                    employerRecurringContributionAmount: z
+                        .string()
+                        .optional()
+                        .describe('Recurring contribution from employer (in cents as string)'),
+                    employeeName: z
+                        .object({
+                            firstName: z.string().describe('First name'),
+                            lastName: z.string().describe('Last name'),
+                            middleName: z.string().optional().describe('Middle name'),
+                        })
+                        .optional()
+                        .describe('Employee name (optional, for display)'),
+                }),
+            )
+            .describe('Array of enrollment requests'),
+    }),
+    graphqlQuery: `
+    mutation BulkEnrollInOfferings($input: [EnrollmentRequestInput!]!) {
+      bulkEnrollInOfferings(input: $input) {
+        externalUserId
+        success
+        message
+      }
+    }
+  `,
+    resultPath: 'bulkEnrollInOfferings',
+};
+
+// Unenroll Participant from Offerings - using Manager API schema
+// unenrollParticipantFromOfferings removes a participant from offerings
+export const unenrollParticipantFromOfferings: ToolDefinition = {
+    name: 'unenroll_participant_from_offerings',
+    description: 'Unenroll a participant from one or more benefit offerings',
+    category: 'Enrollments',
+    inputSchema: z.object({
+        participantUid: z.string().describe('The UID of the participant to unenroll'),
+        offeringIds: z.array(z.string()).describe('Array of offering IDs to unenroll from'),
+        effectiveAt: z.string().optional().describe('Effective date/time for unenrollment (ISO datetime)'),
+        sendEmailConfirmation: z.boolean().optional().describe('Whether to send email confirmation to admin'),
+    }),
+    graphqlQuery: `
+    mutation UnenrollParticipantFromOfferings($input: ParticipantUnenrollmentsInput!) {
+      unenrollParticipantFromOfferings(input: $input) {
+        participantUid
+        externalUserId
+        success
+        message
+      }
+    }
+  `,
+    resultPath: 'unenrollParticipantFromOfferings',
+};
+
 // All tools registry
 export const tools: ToolDefinition[] = [
     // Organizations
@@ -443,9 +661,15 @@ export const tools: ToolDefinition[] = [
     // Users
     listUsers,
     getUserDetails,
+    bulkCreateIndividuals,
     // Benefits
     listBenefitsPrograms,
     listOfferingTemplates,
+    createOrReturnRootBenefitsProgram,
+    createBenefitsOffering,
+    // Enrollments
+    bulkEnrollInOfferings,
+    unenrollParticipantFromOfferings,
     // Claims
     listClaims,
     // Partner/Administrator

@@ -51,8 +51,13 @@ Rules:
    - Use 'list_organization_members' when user wants to see members of a specific organization
    - Use 'list_users' when user wants to LIST multiple users/members/employees/individuals
    - Use 'get_user_details' when user wants detailed information about a SPECIFIC user by UID
+   - Use 'bulk_create_individuals' when user wants to CREATE new individuals/members in an organization
    - Use 'list_benefits_programs' when user wants to LIST benefits programs for an organization
    - Use 'list_offering_templates' when user wants to see available offering templates for a partner
+   - Use 'create_or_return_root_benefits_program' when user wants to CREATE a benefits program for an organization
+   - Use 'create_benefits_offering' when user wants to CREATE a new benefits offering within a program
+   - Use 'bulk_enroll_in_offerings' when user wants to ENROLL individuals in benefit offerings
+   - Use 'unenroll_participant_from_offerings' when user wants to UNENROLL/REMOVE a participant from offerings
    - Use 'list_claims' when user wants to see claims for reimbursement
    - Use 'get_current_partner' when user wants to know about their current partner context
    - Use 'get_current_administrator' when user wants to know about their logged-in administrator account
@@ -62,8 +67,13 @@ Rules:
    - For list_organization_members: {"organizationCode": "ACME", "memberName": "John"}
    - For list_users: {"organizationCodes": ["ACME"], "name": "John"}
    - For get_user_details: {"uid": "user_123"}
+   - For bulk_create_individuals: {"organizationUlid": "org_ulid", "individuals": [{"email": "john@example.com", "name": {"firstName": "John", "lastName": "Doe"}}]}
    - For list_benefits_programs: {"organizationCode": "ACME"}
    - For list_offering_templates: {"partnerCode": "PARTNER"}
+   - For create_or_return_root_benefits_program: {"organizationCode": "ACME"}
+   - For create_benefits_offering: {"benefitsProgramId": "prog_id", "templateId": "tmpl_id", "name": "HSA Benefit", "description": "Health Savings Account", "startDate": "2025-01-01"}
+   - For bulk_enroll_in_offerings: {"enrollments": [{"externalUserId": "emp_123", "offeringId": "off_id"}]}
+   - For unenroll_participant_from_offerings: {"participantUid": "user_uid", "offeringIds": ["off_id"]}
    - For list_claims: {"organizationCodes": ["ACME"], "statuses": ["PENDING"]}
    - For list_organizations: {} (optional: organizationName, organizationCode filter)
 
@@ -173,6 +183,64 @@ Respond with a JSON object in this exact format:
                 tool: 'list_benefits_programs',
                 params: {},
                 reasoning: 'Fallback: Detected benefits programs list keywords',
+                confidence: 0.6,
+            };
+        }
+
+        // Create benefits program
+        if (
+            (lowerMessage.includes('benefit') || lowerMessage.includes('program')) &&
+            lowerMessage.includes('create')
+        ) {
+            return {
+                tool: 'create_or_return_root_benefits_program',
+                params: {},
+                reasoning: 'Fallback: Detected create benefits program keywords',
+                confidence: 0.6,
+            };
+        }
+
+        // Create benefits offering
+        if (lowerMessage.includes('offering') && lowerMessage.includes('create')) {
+            return {
+                tool: 'create_benefits_offering',
+                params: {},
+                reasoning: 'Fallback: Detected create offering keywords',
+                confidence: 0.6,
+            };
+        }
+
+        // Enrollments
+        if (lowerMessage.includes('enroll') && !lowerMessage.includes('unenroll')) {
+            return {
+                tool: 'bulk_enroll_in_offerings',
+                params: {},
+                reasoning: 'Fallback: Detected enrollment keywords',
+                confidence: 0.6,
+            };
+        }
+
+        if (lowerMessage.includes('unenroll') || (lowerMessage.includes('remove') && lowerMessage.includes('offering'))) {
+            return {
+                tool: 'unenroll_participant_from_offerings',
+                params: {},
+                reasoning: 'Fallback: Detected unenrollment keywords',
+                confidence: 0.6,
+            };
+        }
+
+        // Create individuals
+        if (
+            (lowerMessage.includes('user') ||
+                lowerMessage.includes('member') ||
+                lowerMessage.includes('employee') ||
+                lowerMessage.includes('individual')) &&
+            lowerMessage.includes('create')
+        ) {
+            return {
+                tool: 'bulk_create_individuals',
+                params: {},
+                reasoning: 'Fallback: Detected create individual keywords',
                 confidence: 0.6,
             };
         }
