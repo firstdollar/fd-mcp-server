@@ -19,7 +19,7 @@ interface Message {
 }
 
 export default function ChatPage() {
-  const { user, loading, getPartnerApiToken, partnerApiError } = useAuth();
+  const { user, loading, getIdToken } = useAuth();
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -77,11 +77,11 @@ What would you like to do?`,
     setIsProcessing(true);
 
     try {
-      const token = await getPartnerApiToken();
+      const token = await getIdToken();
       if (!token) {
         addMessage({
           role: 'assistant',
-          content: `Sorry, I could not authenticate: ${partnerApiError || 'Failed to get Partner API token'}. Please try signing out and back in.`,
+          content: 'Sorry, I could not authenticate. Please try signing out and back in.',
         });
         return;
       }
