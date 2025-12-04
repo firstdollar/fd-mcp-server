@@ -58,7 +58,7 @@ echo "=========================================="
 echo "Deployment complete!"
 echo "=========================================="
 echo "Service URL: ${SERVICE_URL}"
-echo "MCP Endpoint: ${SERVICE_URL}/mcp"
+echo "MCP Endpoint: ${SERVICE_URL}/mcp/partner"
 echo "Health Check: ${SERVICE_URL}/health"
 echo ""
 echo "To connect Claude Desktop/Code, add to your MCP config:"
@@ -66,10 +66,10 @@ echo ""
 echo '{
   "mcpServers": {
     "fd-partner-api": {
-      "url": "'${SERVICE_URL}'/mcp",
+      "url": "'${SERVICE_URL}'/mcp/partner",
       "transport": "streamable-http",
       "headers": {
-        "Authorization": "Bearer YOUR_FIREBASE_TOKEN"
+        "X-API-Key": "your-client-id@partner.firstdollar.com:your-client-secret"
       }
     }
   }
