@@ -18,11 +18,6 @@ import {
 } from 'firebase/auth';
 import { auth, getPartnerApiAuth } from './firebase';
 
-interface Partner {
-  shortCode: string;
-  name: string;
-}
-
 interface PartnerApiToken {
   /** The Partner API ID token */
   token: string;
@@ -71,16 +66,6 @@ interface AuthContextType {
   verifyMfaCode: (code: string) => Promise<void>;
   /** Cancel MFA flow */
   cancelMfa: () => void;
-  /** Whether the current user is an FD Admin with access to all partners */
-  isFdAdmin: boolean;
-  /** List of partners the user has access to */
-  availablePartners: Partner[];
-  /** Currently selected partner (for FD Admins) */
-  selectedPartner: string | null;
-  /** Set the selected partner (for FD Admins) */
-  setSelectedPartner: (partnerCode: string) => void;
-  /** Whether partners are being loaded */
-  loadingPartners: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -96,45 +81,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [mfaState, setMfaState] = useState<MfaState | null>(null);
   const [recaptchaVerifier, setRecaptchaVerifier] = useState<RecaptchaVerifier | null>(null);
 
-  // New state for partner selection
-  const [isFdAdmin, setIsFdAdmin] = useState(false);
-  const [availablePartners, setAvailablePartners] = useState<Partner[]>([]);
-  const [selectedPartner, setSelectedPartnerState] = useState<string | null>(null);
-  const [loadingPartners, setLoadingPartners] = useState(false);
-
-  // Fetch available partners when user logs in
-  const fetchAvailablePartners = useCallback(async (userToken: string) => {
-    setLoadingPartners(true);
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.dev.firstdollar.com';
-      const response = await fetch(`${apiUrl}/mcp/partners`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${userToken}`,
-        },
-      });
-
-      if (!response.ok) {
-        console.error('Failed to fetch partners:', response.status);
-        return;
-      }
-
-      const data = await response.json();
-      setIsFdAdmin(data.isFdAdmin);
-      setAvailablePartners(data.partners);
-
-      // If not an FD admin, auto-select their only partner
-      if (!data.isFdAdmin && data.partners.length === 1) {
-        setSelectedPartnerState(data.partners[0].shortCode);
-      }
-      // If FD admin and no partner selected yet, don't auto-select (let them choose)
-    } catch (error) {
-      console.error('Error fetching partners:', error);
-    } finally {
-      setLoadingPartners(false);
-    }
-  }, []);
-
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
@@ -144,28 +90,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!user) {
         setPartnerApiToken(null);
         setPartnerApiError(null);
-        setIsFdAdmin(false);
-        setAvailablePartners([]);
-        setSelectedPartnerState(null);
       } else {
-        // Fetch available partners when user logs in
         setMfaState(null);
-        const token = await user.getIdToken();
-        if (token) {
-          fetchAvailablePartners(token);
-        }
       }
     });
 
     return () => unsubscribe();
-  }, [fetchAvailablePartners]);
-
-  // When selected partner changes, clear the cached token so a new one is fetched
-  const setSelectedPartner = useCallback((partnerCode: string) => {
-    setSelectedPartnerState(partnerCode);
-    // Clear cached token so getPartnerApiToken fetches a new one for the selected partner
-    setPartnerApiToken(null);
-    setPartnerApiError(null);
   }, []);
 
   const signIn = async (email: string, password: string) => {
@@ -213,9 +143,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setPartnerApiToken(null);
       setPartnerApiError(null);
       setMfaState(null);
-      setIsFdAdmin(false);
-      setAvailablePartners([]);
-      setSelectedPartnerState(null);
     } catch (error) {
       throw error;
     }
@@ -342,17 +269,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const getPartnerApiToken = useCallback(async (): Promise<string | null> => {
     if (!user) return null;
 
-    // For FD Admins, they must select a partner first
-    if (isFdAdmin && !selectedPartner) {
-      setPartnerApiError('Please select a partner first');
-      return null;
-    }
-
-    // Return cached token if still valid AND for the same partner
+    // Return cached token if still valid
     if (
       partnerApiToken &&
-      Date.now() - partnerApiToken.obtainedAt < TOKEN_VALIDITY_MS &&
-      partnerApiToken.partnerCode === (selectedPartner || partnerApiToken.partnerCode)
+      Date.now() - partnerApiToken.obtainedAt < TOKEN_VALIDITY_MS
     ) {
       return partnerApiToken.token;
     }
@@ -369,18 +289,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Step 2: Call the token exchange endpoint
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.dev.firstdollar.com';
 
-      // Include partner code in request for FD Admins
-      const requestBody: { idToken: string; partnerCode?: string } = { idToken: adminToken };
-      if (isFdAdmin && selectedPartner) {
-        requestBody.partnerCode = selectedPartner;
-      }
-
       const exchangeResponse = await fetch(`${apiUrl}/mcp/token-exchange`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({ idToken: adminToken }),
       });
 
       if (!exchangeResponse.ok) {
@@ -413,7 +327,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setPartnerApiError(errorMessage);
       return null;
     }
-  }, [user, partnerApiToken, isFdAdmin, selectedPartner]);
+  }, [user, partnerApiToken]);
 
   return (
     <AuthContext.Provider
@@ -431,11 +345,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sendMfaCode,
         verifyMfaCode,
         cancelMfa,
-        isFdAdmin,
-        availablePartners,
-        selectedPartner,
-        setSelectedPartner,
-        loadingPartners,
       }}
     >
       {children}
