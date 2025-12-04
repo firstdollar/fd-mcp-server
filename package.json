@@ -11,8 +11,9 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "dev:mcp": "tsx watch src/server/index.ts",
-    "build": "next build && npm run build:mcp",
-    "build:mcp": "tsc -p tsconfig.server.json",
+    "clean": "rm -rf dist .next tsconfig.tsbuildinfo next-env.d.ts",
+    "build": "next build && npm run build:mcp && rm -f next-env.d.ts",
+    "build:mcp": "tsc -p tsconfig.server.json && rm -f tsconfig.tsbuildinfo",
     "start": "next start -p 3000",
     "start:mcp": "node dist/server/index.js",
     "lint": "next lint",
