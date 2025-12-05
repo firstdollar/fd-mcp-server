@@ -31,7 +31,7 @@ class ApiClient {
     }
 
     async graphql<T = unknown>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.dev.firstdollar.com';
+        const apiUrl = process.env.NEXT_PUBLIC_MANAGER_API_URL || 'https://manager.api.dev.firstdollar.com';
         const response = await fetch(`${apiUrl}/graphql`, {
             method: 'POST',
             headers: {

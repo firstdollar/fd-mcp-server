@@ -9,722 +9,647 @@ export interface ToolDefinition {
     resultPath: string;
 }
 
-// Organizations
+// Organizations - using Manager API schema
+// Organization type has: id, name, organizationCode (not shortCode)
+// PageInput uses: first, after (not size, cursor)
 export const listOrganizations: ToolDefinition = {
     name: 'list_organizations',
     description: 'List all organizations for the authenticated partner',
     category: 'Organizations',
     inputSchema: z.object({
-        first: z.number().optional().describe('Number of results to return (default: 100)'),
-        after: z.string().optional().describe('Cursor for pagination (from previous pageInfo.endCursor)'),
+        organizationName: z.string().optional().describe('Filter by organization name (exact match)'),
+        organizationCode: z.string().optional().describe('Filter by organization short code'),
+        first: z.number().optional().describe('Number of results to return (default: 25)'),
+        after: z.string().optional().describe('Cursor for pagination'),
     }),
     graphqlQuery: `
-    query ListOrganizations($first: Int, $after: String) {
-      organizations(first: $first, after: $after) {
-        ... on OrganizationsResults {
-          nodes {
-            id
-            name
-            shortCode
-          }
-          pageInfo {
-            hasNextPage
-            endCursor
-          }
+    query ListOrganizations($input: FilteredPartnerOrganizationsInput!) {
+      filteredPartnerOrganizations(input: $input) {
+        pageInfo {
+          hasNextPage
+          endCursor
         }
-        ... on BadRequestError {
-          message
-        }
-        ... on InternalServerError {
-          message
+        organizations {
+          cursor
+          node {
+            organization {
+              id
+              name
+              organizationCode
+            }
+            totals {
+              numberOfMembers
+            }
+          }
         }
       }
     }
   `,
-    resultPath: 'organizations',
+    resultPath: 'filteredPartnerOrganizations',
 };
 
 export const getOrganization: ToolDefinition = {
     name: 'get_organization',
-    description:
-        'Get details of a specific organization by ID (use the id field from list_organizations, not shortCode)',
+    description: 'Get details of a specific organization by short code',
     category: 'Organizations',
     inputSchema: z.object({
-        id: z.string().describe('The organization ID (ULID format like "01ABC...", not the shortCode)'),
+        organizationCode: z.string().describe('The organization short code'),
     }),
     graphqlQuery: `
-    query GetOrganization($id: ID!) {
-      organization(where: { id: $id }) {
-        ... on Organization {
-          id
-          name
-          shortCode
-        }
-        ... on BadRequestError {
-          message
-        }
-        ... on InternalServerError {
-          message
+    query GetOrganization($input: FilteredPartnerOrganizationsInput!) {
+      filteredPartnerOrganizations(input: $input) {
+        organizations {
+          node {
+            organization {
+              id
+              name
+              organizationCode
+            }
+            totals {
+              numberOfMembers
+            }
+          }
         }
       }
     }
   `,
-    resultPath: 'organization',
+    resultPath: 'filteredPartnerOrganizations',
 };
 
-// Individuals
-export const listIndividuals: ToolDefinition = {
-    name: 'list_individuals',
-    description: 'List individuals (members) for the authenticated partner',
-    category: 'Individuals',
+// Organization Members - using Manager API schema
+// PartnerOrganizationMembersResultNode has: uid, name (PersonName), externalUserId, employeeId, disabled, kycStatus, employmentStatus, currentHsaAccountBalance, benefitOfferingEnrollments
+export const listOrganizationMembers: ToolDefinition = {
+    name: 'list_organization_members',
+    description: 'List members of a specific organization',
+    category: 'Organizations',
     inputSchema: z.object({
-        first: z.number().optional().describe('Number of results to return (default: 100)'),
+        organizationCode: z.string().describe('The organization short code'),
+        memberName: z.string().optional().describe('Filter by member name'),
+        filterByDisabledStatus: z.boolean().optional().describe('Filter by disabled status'),
+        filterByEmploymentStatus: z
+            .string()
+            .optional()
+            .describe('Filter by employment status (EMPLOYED or NOT_EMPLOYED)'),
+        first: z.number().optional().describe('Number of results to return'),
         after: z.string().optional().describe('Cursor for pagination'),
-        organizationIds: z.array(z.string()).optional().describe('Filter by organization IDs'),
-        benefitIds: z.array(z.string()).optional().describe('Filter by benefit IDs'),
-        benefitsProgramIds: z.array(z.string()).optional().describe('Filter by benefits program IDs'),
     }),
     graphqlQuery: `
-    query ListIndividuals($first: Int, $after: String, $organizationIds: [ID!], $benefitIds: [ID!], $benefitsProgramIds: [ID!]) {
-      individuals(
-        first: $first,
-        after: $after,
-        where: {
-          organizationIds: $organizationIds,
-          benefitIds: $benefitIds,
-          benefitsProgramIds: $benefitsProgramIds
+    query ListOrganizationMembers($input: FilteredPartnerOrganizationMembersInput!) {
+      filteredPartnerOrganizationMembers(input: $input) {
+        pageInfo {
+          hasNextPage
+          endCursor
         }
-      ) {
-        ... on IndividualsResults {
-          nodes {
-            id
+        members {
+          cursor
+          node {
+            uid
             name {
               firstName
               lastName
             }
-            email
-            dateOfBirth
-            phoneNumber
+            externalUserId
+            employeeId
+            disabled
+            kycStatus
+            employmentStatus
+            currentHsaAccountBalance
+            benefitOfferingEnrollments {
+              name
+              enrollmentActive
+              accountType
+              accountBalance {
+                amount
+                currency
+              }
+            }
           }
-          pageInfo {
-            hasNextPage
-            endCursor
-          }
-        }
-        ... on BadRequestError {
-          message
-        }
-        ... on InternalServerError {
-          message
         }
       }
     }
   `,
-    resultPath: 'individuals',
+    resultPath: 'filteredPartnerOrganizationMembers',
 };
 
-export const getIndividual: ToolDefinition = {
-    name: 'get_individual',
-    description: 'Get details of a specific individual by ID',
-    category: 'Individuals',
+// Users/Individuals - using Manager API schema (filteredPartnerUsers and partnerUserDetails)
+// FilteredPartnerUsersInput has: uid, externalUserId, employeeId, name, kycStatus, page, orderBy, organizationCodes
+// PartnerUserSearchResultNode has: uid, personName (PersonName), employeeId, externalUserId, enrollmentDate, dateOfBirth, maskedSSN, kycVerificationResult, organizationMemberships
+export const listUsers: ToolDefinition = {
+    name: 'list_users',
+    description: 'List users/members for the authenticated partner',
+    category: 'Users',
     inputSchema: z.object({
-        id: z.string().describe('The individual ID'),
+        organizationCodes: z.array(z.string()).optional().describe('Filter by organization short codes'),
+        name: z.string().optional().describe('Search by user name'),
+        uid: z.string().optional().describe('Search by specific user UID'),
+        externalUserId: z.string().optional().describe('Search by external user ID'),
+        employeeId: z.string().optional().describe('Search by employee ID'),
+        kycStatus: z
+            .array(z.string())
+            .optional()
+            .describe('Filter by KYC status (e.g., VERIFIED, PENDING, NEEDS_REVIEW, REJECTED)'),
+        first: z.number().optional().describe('Number of results to return'),
+        after: z.string().optional().describe('Cursor for pagination'),
     }),
     graphqlQuery: `
-    query GetIndividual($id: ID!) {
-      individual(where: { id: $id }) {
-        ... on Individual {
-          id
+    query ListUsers($input: FilteredPartnerUsersInput!) {
+      filteredPartnerUsers(input: $input) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        userResults {
+          cursor
+          node {
+            uid
+            personName {
+              firstName
+              lastName
+            }
+            employeeId
+            externalUserId
+            enrollmentDate
+            dateOfBirth
+            maskedSSN
+            kycVerificationResult {
+              status
+            }
+            organizationMemberships {
+              organizationCode
+              organizationName
+            }
+          }
+        }
+      }
+    }
+  `,
+    resultPath: 'filteredPartnerUsers',
+};
+
+// PartnerUserDetails has: uid, profile (UserProfile), email, disabled, organizationMemberships, userDetailsAreEditableForKYC
+// UserProfile has: name (PersonName), birthday, contactInfo (ContactInfo), homeAddress, mailingAddress, tin, uid
+// ContactInfo has: mobilePhone, mobilePhoneCountryCode, mobilePhoneVerified (no email field)
+// OrganizationMembershipResultNode has: organizationCode, organizationName, organizationPublicUlid, roles
+export const getUserDetails: ToolDefinition = {
+    name: 'get_user_details',
+    description: 'Get detailed information about a specific user by UID',
+    category: 'Users',
+    inputSchema: z.object({
+        uid: z.string().describe('The user UID'),
+        includeInactiveOrganizationMemberships: z
+            .boolean()
+            .optional()
+            .describe('Include inactive organization memberships'),
+    }),
+    graphqlQuery: `
+    query GetUserDetails($input: PartnerUserDetailsInput!) {
+      partnerUserDetails(input: $input) {
+        uid
+        disabled
+        userDetailsAreEditableForKYC
+        profile {
           name {
             firstName
+            middleName
             lastName
           }
-          email
-          dateOfBirth
-          phoneNumber
-          address {
+          birthday
+          homeAddress {
             addressLine1
             addressLine2
             city
             state
             zip
-            country
           }
-          healthWallet {
-            accounts {
-              id
-              active
-              currentBalance {
-                amount
-                currency
-              }
-              availableBalance {
-                amount
-                currency
-              }
-              benefit {
-                id
-                name
-                type
-              }
-            }
+          mailingAddress {
+            addressLine1
+            addressLine2
+            city
+            state
+            zip
           }
-          organizationMemberships(first: 10) {
-            nodes {
-              externalUserId
-              organization {
-                id
-                name
-              }
-            }
+          contactInfo {
+            mobilePhone
+            mobilePhoneCountryCode
           }
         }
-        ... on BadRequestError {
-          message
+        email {
+          address
         }
-        ... on InternalServerError {
-          message
+        organizationMemberships {
+          memberships {
+            cursor
+            node {
+              organizationCode
+              organizationName
+              organizationPublicUlid
+              roles
+            }
+          }
         }
       }
     }
   `,
-    resultPath: 'individual',
+    resultPath: 'partnerUserDetails',
 };
 
-// Benefits Programs
+// Benefits Programs - using Manager API schema
+// Query: partnerOrganizationBenefitsPrograms returns BenefitsPrograms
+// BenefitsPrograms has: pageInfo, programs (array of BenefitsProgramNode)
+// BenefitsProgramNode has: cursor, node (BenefitsProgram)
+// BenefitsProgram has: id, offerings (array of BenefitsOfferingNode), pageInfo
+// BenefitsOfferingNode has: cursor, node (BenefitsOffering)
+// BenefitsOffering has: id, name, description, type (accountType), status, startDate, endDate
 export const listBenefitsPrograms: ToolDefinition = {
     name: 'list_benefits_programs',
-    description: 'List benefits programs for the authenticated partner',
+    description: 'List benefits programs for an organization',
     category: 'Benefits',
     inputSchema: z.object({
+        organizationCode: z.string().describe('The organization short code'),
         first: z.number().optional().describe('Number of results to return'),
         after: z.string().optional().describe('Cursor for pagination'),
-        organizationIds: z.array(z.string()).optional().describe('Filter by organization IDs'),
     }),
     graphqlQuery: `
-    query ListBenefitsPrograms($first: Int, $after: String, $organizationIds: [ID!]) {
-      benefitsPrograms(first: $first, after: $after, where: { organizationIds: $organizationIds }) {
-        ... on BenefitsProgramsResults {
-          nodes {
+    query ListBenefitsPrograms($input: PartnerOrganizationBenefitsProgramsInput!) {
+      partnerOrganizationBenefitsPrograms(input: $input) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        programs {
+          cursor
+          node {
+            id
+            offerings {
+              cursor
+              node {
+                id
+                name
+                description
+                type
+                status
+                startDate
+                endDate
+              }
+            }
+          }
+        }
+      }
+    }
+  `,
+    resultPath: 'partnerOrganizationBenefitsPrograms',
+};
+
+// Offering Templates - using Manager API schema
+// BenefitsOfferingTemplates has: pageInfo, templates (array of BenefitsOfferingTemplateNode)
+// BenefitsOfferingTemplateNode has: cursor, node (BenefitsOfferingTemplate)
+// BenefitsOfferingTemplate has: id, name, description, type (accountType), substantiationRequirement, fundingStrategy
+export const listOfferingTemplates: ToolDefinition = {
+    name: 'list_offering_templates',
+    description: 'List available offering templates for a partner',
+    category: 'Benefits',
+    inputSchema: z.object({
+        partnerCode: z.string().describe('The partner short code'),
+        first: z.number().optional().describe('Number of results to return'),
+        after: z.string().optional().describe('Cursor for pagination'),
+    }),
+    graphqlQuery: `
+    query ListOfferingTemplates($input: PartnerOfferingTemplatesInput!) {
+      partnerOfferingTemplates(input: $input) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        templates {
+          cursor
+          node {
             id
             name
-            organizationId
-            benefits {
+            description
+            type
+            substantiationRequirement
+            fundingStrategy
+          }
+        }
+      }
+    }
+  `,
+    resultPath: 'partnerOfferingTemplates',
+};
+
+// Claims - using Manager API schema
+// ClaimForReimbursementAdministrativeView has: id, amount, amountForDisplay, status, dateOfClaimSubmission, dateOfClaimTransaction, merchant, organizationName, user
+export const listClaims: ToolDefinition = {
+    name: 'list_claims',
+    description: 'List claims for reimbursement',
+    category: 'Claims',
+    inputSchema: z.object({
+        organizationCodes: z.array(z.string()).optional().describe('Filter by organization short codes'),
+        partnerCodes: z.array(z.string()).optional().describe('Filter by partner codes'),
+        statuses: z
+            .array(z.string())
+            .optional()
+            .describe('Filter by claim statuses (e.g., PENDING, IN_REVIEW, APPROVED, DENIED)'),
+        userIds: z.array(z.string()).optional().describe('Filter by user UIDs'),
+        userFullName: z.string().optional().describe('Filter by user full name'),
+        offeringTypes: z
+            .array(z.string())
+            .optional()
+            .describe('Filter by offering types (e.g., HSA, FSA, LSA, DCFSA, HRA)'),
+        startDate: z.string().optional().describe('Start date (YYYY-MM-DD format)'),
+        endDate: z.string().optional().describe('End date (YYYY-MM-DD format)'),
+        first: z.number().optional().describe('Number of results to return'),
+        after: z.string().optional().describe('Cursor for pagination'),
+    }),
+    graphqlQuery: `
+    query ListClaims($input: PartnerListClaimsForReimbursementInput!) {
+      partnerListClaimsForReimbursement(input: $input) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        totalCount
+        claims {
+          id
+          status
+          dateOfClaimSubmission
+          dateOfClaimTransaction
+          amount
+          amountForDisplay
+          merchant
+          organizationName
+        }
+      }
+    }
+  `,
+    resultPath: 'partnerListClaimsForReimbursement',
+};
+
+// Current Partner - using Manager API schema
+// Partner has: shortCode, name
+export const getCurrentPartner: ToolDefinition = {
+    name: 'get_current_partner',
+    description: 'Get details about the current partner context',
+    category: 'Partner',
+    inputSchema: z.object({}),
+    graphqlQuery: `
+    query GetCurrentPartner {
+      currentPartner {
+        shortCode
+        name
+      }
+    }
+  `,
+    resultPath: 'currentPartner',
+};
+
+// Current Administrator Details - using Manager API schema
+// currentAdministratorDetailsPayload has: administeredEntity, currentAdministratorProfile
+// AdministeredEntity has: name, id, code, partnerCode, administeredEntityType
+// AdministratorProfile has: name (PersonName), mobilePhoneContactInfo
+export const getCurrentAdministrator: ToolDefinition = {
+    name: 'get_current_administrator',
+    description: 'Get details about the current logged-in administrator',
+    category: 'Administrator',
+    inputSchema: z.object({}),
+    graphqlQuery: `
+    query GetCurrentAdministrator {
+      currentAdministratorDetails {
+        administeredEntity {
+          name
+          id
+          code
+          partnerCode
+          administeredEntityType
+        }
+        currentAdministratorProfile {
+          name {
+            firstName
+            lastName
+          }
+        }
+      }
+    }
+  `,
+    resultPath: 'currentAdministratorDetails',
+};
+
+// Create or Return Root Benefits Program - using Manager API schema
+// partnerCreateOrReturnRootBenefitsProgram creates or returns the root benefits program for an organization
+export const createOrReturnRootBenefitsProgram: ToolDefinition = {
+    name: 'create_or_return_root_benefits_program',
+    description: 'Create or return the root benefits program for an organization. If a program already exists, it returns the existing one.',
+    category: 'Benefits',
+    inputSchema: z.object({
+        organizationCode: z.string().describe('The organization short code'),
+    }),
+    graphqlQuery: `
+    mutation CreateOrReturnRootBenefitsProgram($input: PartnerCreateOrReturnRootBenefitsProgramInput!) {
+      partnerCreateOrReturnRootBenefitsProgram(input: $input) {
+        program {
+          id
+          offerings {
+            cursor
+            node {
               id
               name
               type
-              description
+              status
               startDate
               endDate
             }
           }
-          pageInfo {
-            hasNextPage
-            endCursor
-          }
-        }
-        ... on BadRequestError {
-          message
-        }
-        ... on InternalServerError {
-          message
         }
       }
     }
   `,
-    resultPath: 'benefitsPrograms',
+    resultPath: 'partnerCreateOrReturnRootBenefitsProgram',
 };
 
-export const getBenefitsProgram: ToolDefinition = {
-    name: 'get_benefits_program',
-    description: 'Get details of a specific benefits program by ID',
+// Create Benefits Offering - using Manager API schema
+// partnerCreateBenefitsOffering creates a new benefits offering within a program
+export const createBenefitsOffering: ToolDefinition = {
+    name: 'create_benefits_offering',
+    description: 'Create a new benefits offering within a benefits program for an organization',
     category: 'Benefits',
     inputSchema: z.object({
-        id: z.string().describe('The benefits program ID'),
+        benefitsProgramId: z.string().describe('The public ID of the benefits program'),
+        templateId: z.string().describe('The public ID of the offering template to use'),
+        name: z.string().describe('The user-displayable name for the offering'),
+        description: z.string().describe('A description of the offering'),
+        startDate: z.string().describe('The start date (YYYY-MM-DD format)'),
+        endDate: z.string().optional().describe('The end date (YYYY-MM-DD format, optional)'),
+        internalName: z.string().optional().describe('Internal name for the offering (optional)'),
     }),
     graphqlQuery: `
-    query GetBenefitsProgram($id: ID!) {
-      benefitsProgram(where: { id: $id }) {
-        ... on BenefitsProgram {
+    mutation CreateBenefitsOffering($input: CreateBenefitsOfferingInput!) {
+      partnerCreateBenefitsOffering(input: $input) {
+        offering {
           id
           name
-          organizationId
-          benefits {
-            id
-            name
-            type
-            description
-            startDate
-            endDate
-            configuration {
-              funding {
-                limits {
-                  individual {
-                    amount
-                    currency
-                  }
-                }
-                initialFunding {
-                  individual {
-                    amount
-                    currency
-                  }
-                }
-              }
-            }
-          }
-        }
-        ... on BadRequestError {
-          message
-        }
-        ... on InternalServerError {
-          message
-        }
-      }
-    }
-  `,
-    resultPath: 'benefitsProgram',
-};
-
-// Benefits
-export const getBenefit: ToolDefinition = {
-    name: 'get_benefit',
-    description: 'Get details of a specific benefit by ID',
-    category: 'Benefits',
-    inputSchema: z.object({
-        id: z.string().describe('The benefit ID'),
-    }),
-    graphqlQuery: `
-    query GetBenefit($id: ID!) {
-      benefit(where: { id: $id }) {
-        ... on Benefit {
-          id
-          name
-          type
           description
+          type
+          status
           startDate
           endDate
-          configuration {
-            funding {
-              limits {
-                individual {
-                  amount
-                  currency
-                }
-              }
-              initialFunding {
-                individual {
-                  amount
-                  currency
-                }
-              }
-            }
-          }
         }
-        ... on BadRequestError {
-          message
-        }
-        ... on InternalServerError {
-          message
+        program {
+          id
         }
       }
     }
   `,
-    resultPath: 'benefit',
+    resultPath: 'partnerCreateBenefitsOffering',
 };
 
-// Benefit Templates
-export const listBenefitTemplates: ToolDefinition = {
-    name: 'list_benefit_templates',
-    description: 'List available benefit templates',
-    category: 'Benefits',
+// Bulk Create Individuals - using Manager API schema
+// bulkCreateIndividuals creates multiple individuals in an organization
+export const bulkCreateIndividuals: ToolDefinition = {
+    name: 'bulk_create_individuals',
+    description: 'Create multiple individuals (members) in an organization',
+    category: 'Users',
     inputSchema: z.object({
-        first: z.number().optional().describe('Number of results to return'),
-        after: z.string().optional().describe('Cursor for pagination'),
+        organizationUlid: z.string().describe('The public ULID of the organization'),
+        individuals: z
+            .array(
+                z.object({
+                    email: z.string().describe('The individual email address (required)'),
+                    name: z
+                        .object({
+                            firstName: z.string().describe('First name'),
+                            lastName: z.string().describe('Last name'),
+                            middleName: z.string().optional().describe('Middle name (optional)'),
+                        })
+                        .describe('The individual name'),
+                    dateOfBirth: z.string().optional().describe('Date of birth (YYYY-MM-DD format)'),
+                    phoneNumber: z.string().optional().describe('Phone number'),
+                    tin: z.string().optional().describe('Tax Identification Number (SSN)'),
+                    externalUserId: z.string().optional().describe('External user ID from your system'),
+                    language: z.string().optional().describe('Language preference (e.g., en, es)'),
+                    address: z
+                        .object({
+                            addressLine1: z.string().describe('Street address line 1'),
+                            addressLine2: z.string().optional().describe('Street address line 2'),
+                            city: z.string().describe('City'),
+                            state: z.string().describe('State code (e.g., CA, NY)'),
+                            zip: z.string().describe('ZIP code'),
+                            country: z.string().optional().describe('Country code (default: US)'),
+                        })
+                        .optional()
+                        .describe('Primary address'),
+                    mailingAddress: z
+                        .object({
+                            addressLine1: z.string().describe('Street address line 1'),
+                            addressLine2: z.string().optional().describe('Street address line 2'),
+                            city: z.string().describe('City'),
+                            state: z.string().describe('State code (e.g., CA, NY)'),
+                            zip: z.string().describe('ZIP code'),
+                            country: z.string().optional().describe('Country code (default: US)'),
+                        })
+                        .optional()
+                        .describe('Mailing address (if different from primary)'),
+                }),
+            )
+            .describe('Array of individuals to create'),
     }),
     graphqlQuery: `
-    query ListBenefitTemplates($first: Int, $after: String) {
-      benefitTemplates(first: $first, after: $after) {
-        ... on BenefitTemplatesResults {
-          nodes {
-            id
-            name
-            type
-            description
-          }
-          pageInfo {
-            hasNextPage
-            endCursor
-          }
+    mutation BulkCreateIndividuals($input: BulkCreateIndividualsInput!) {
+      bulkCreateIndividuals(input: $input) {
+        ... on BulkCreateIndividualsSuccess {
+          success
+          uid
         }
-        ... on BadRequestError {
-          message
-        }
-        ... on InternalServerError {
+        ... on BulkCreateIndividualsFailure {
+          success
           message
         }
       }
     }
   `,
-    resultPath: 'benefitTemplates',
+    resultPath: 'bulkCreateIndividuals',
 };
 
-// Mutations - Create Organization
-export const createOrganization: ToolDefinition = {
-    name: 'create_organization',
-    description: 'Create a new organization within a partner',
-    category: 'Organizations',
+// Bulk Enroll in Offerings - using Manager API schema
+// bulkEnrollInOfferings enrolls individuals in benefit offerings
+export const bulkEnrollInOfferings: ToolDefinition = {
+    name: 'bulk_enroll_in_offerings',
+    description: 'Enroll one or more individuals in benefit offerings',
+    category: 'Enrollments',
     inputSchema: z.object({
-        name: z.string().describe('The name of the organization to create'),
+        enrollments: z
+            .array(
+                z.object({
+                    externalUserId: z.string().describe('External user ID of the individual to enroll'),
+                    offeringId: z.string().describe('The public ID of the offering to enroll in'),
+                    enrollmentStartDate: z.string().optional().describe('Enrollment start date (ISO datetime)'),
+                    enrollmentEndDate: z.string().optional().describe('Enrollment end date (ISO datetime)'),
+                    coverageType: z
+                        .enum(['INDIVIDUAL', 'FAMILY', 'NONE'])
+                        .optional()
+                        .describe('Health insurance coverage type for HSA limits'),
+                    employeeInitialContributionAmount: z
+                        .string()
+                        .optional()
+                        .describe('Initial contribution from employee (in cents as string)'),
+                    employerInitialContributionAmount: z
+                        .string()
+                        .optional()
+                        .describe('Initial contribution from employer (in cents as string)'),
+                    employeeRecurringContributionAmount: z
+                        .string()
+                        .optional()
+                        .describe('Recurring contribution from employee (in cents as string)'),
+                    employerRecurringContributionAmount: z
+                        .string()
+                        .optional()
+                        .describe('Recurring contribution from employer (in cents as string)'),
+                    employeeName: z
+                        .object({
+                            firstName: z.string().describe('First name'),
+                            lastName: z.string().describe('Last name'),
+                            middleName: z.string().optional().describe('Middle name'),
+                        })
+                        .optional()
+                        .describe('Employee name (optional, for display)'),
+                }),
+            )
+            .describe('Array of enrollment requests'),
     }),
     graphqlQuery: `
-    mutation CreateOrganization($input: CreateOrganizationInput!) {
-      createOrganization(input: $input) {
-        ... on CreateOrganizationResult {
-          organization {
-            id
-            name
-            shortCode
-          }
-        }
-        ... on BadRequestError {
-          message
-          code
-        }
+    mutation BulkEnrollInOfferings($input: [EnrollmentRequestInput!]!) {
+      bulkEnrollInOfferings(input: $input) {
+        externalUserId
+        success
+        message
       }
     }
   `,
-    resultPath: 'createOrganization',
+    resultPath: 'bulkEnrollInOfferings',
 };
 
-// Mutations - Create Individual
-export const createIndividual: ToolDefinition = {
-    name: 'create_individual',
-    description: 'Create a new individual within an organization',
-    category: 'Individuals',
+// Unenroll Participant from Offerings - using Manager API schema
+// unenrollParticipantFromOfferings removes a participant from offerings
+export const unenrollParticipantFromOfferings: ToolDefinition = {
+    name: 'unenroll_participant_from_offerings',
+    description: 'Unenroll a participant from one or more benefit offerings',
+    category: 'Enrollments',
     inputSchema: z.object({
-        firstName: z.string().describe('First name of the individual'),
-        lastName: z.string().describe('Last name of the individual'),
-        middleName: z.string().optional().describe('Middle name of the individual'),
-        email: z.string().optional().describe('Email address'),
-        phoneNumber: z.string().optional().describe('Phone number'),
-        dateOfBirth: z.string().optional().describe('Date of birth in YYYY-MM-DD format'),
-        tin: z.string().optional().describe('Tax identification number (SSN)'),
-        addressLine1: z.string().optional().describe('Primary address line'),
-        addressLine2: z.string().optional().describe('Secondary address line'),
-        city: z.string().optional().describe('City'),
-        state: z.string().optional().describe('State abbreviation (e.g., CA, NY)'),
-        zip: z.string().optional().describe('ZIP code'),
-        country: z.string().optional().describe('Country code (defaults to US)'),
-        language: z.string().optional().describe('Preferred language (defaults to en)'),
-        externalUserId: z.string().optional().describe('External user ID'),
+        participantUid: z.string().describe('The UID of the participant to unenroll'),
+        offeringIds: z.array(z.string()).describe('Array of offering IDs to unenroll from'),
+        effectiveAt: z.string().optional().describe('Effective date/time for unenrollment (ISO datetime)'),
+        sendEmailConfirmation: z.boolean().optional().describe('Whether to send email confirmation to admin'),
     }),
     graphqlQuery: `
-    mutation CreateIndividual($input: CreateIndividualInput!) {
-      createIndividual(input: $input) {
-        ... on CreateIndividualResult {
-          individual {
-            id
-            name {
-              firstName
-              middleName
-              lastName
-            }
-            address {
-              addressLine1
-              addressLine2
-              city
-              state
-              country
-              zip
-            }
-            mailingAddress {
-              addressLine1
-              addressLine2
-              city
-              state
-              country
-              zip
-            }
-            phoneNumber
-            email
-            tin
-            dateOfBirth
-            language
-          }
-        }
-        ... on BadRequestError {
-          message
-          code
-        }
+    mutation UnenrollParticipantFromOfferings($input: ParticipantUnenrollmentsInput!) {
+      unenrollParticipantFromOfferings(input: $input) {
+        participantUid
+        externalUserId
+        success
+        message
       }
     }
   `,
-    resultPath: 'createIndividual',
-};
-
-// Mutations - Update Individual
-export const updateIndividual: ToolDefinition = {
-    name: 'update_individual',
-    description: 'Update an existing individual with new information',
-    category: 'Individuals',
-    inputSchema: z.object({
-        id: z.string().describe('The ID of the individual to update'),
-        firstName: z.string().optional().describe('New first name'),
-        lastName: z.string().optional().describe('New last name'),
-        middleName: z.string().optional().describe('New middle name'),
-        email: z.string().optional().describe('New email address'),
-        phoneNumber: z.string().optional().describe('New phone number'),
-        dateOfBirth: z.string().optional().describe('New date of birth in YYYY-MM-DD format'),
-        tin: z.string().optional().describe('New tax identification number'),
-        addressLine1: z.string().optional().describe('New primary address line'),
-        addressLine2: z.string().optional().describe('New secondary address line'),
-        city: z.string().optional().describe('New city'),
-        state: z.string().optional().describe('New state abbreviation'),
-        zip: z.string().optional().describe('New ZIP code'),
-        country: z.string().optional().describe('New country code'),
-        language: z.string().optional().describe('New language preference'),
-    }),
-    graphqlQuery: `
-    mutation UpdateIndividual($input: UpdateIndividualInput!) {
-      updateIndividual(input: $input) {
-        ... on UpdateIndividualResult {
-          individual {
-            id
-            name {
-              firstName
-              middleName
-              lastName
-            }
-            address {
-              addressLine1
-              addressLine2
-              city
-              state
-              country
-              zip
-            }
-            mailingAddress {
-              addressLine1
-              addressLine2
-              city
-              state
-              country
-              zip
-            }
-            phoneNumber
-            email
-            tin
-            dateOfBirth
-            language
-            verifications {
-              id
-              status
-              verificationCodes
-            }
-          }
-        }
-        ... on BadRequestError {
-          code
-          message
-        }
-        ... on InternalServerError {
-          code
-          message
-        }
-      }
-    }
-  `,
-    resultPath: 'updateIndividual',
-};
-
-// Mutations - Verify Individual
-export const verifyIndividual: ToolDefinition = {
-    name: 'verify_individual',
-    description: 'Verify an individual through KYC (Know Your Customer) checks',
-    category: 'Individuals',
-    inputSchema: z.object({
-        individualId: z.string().describe('The ID of the individual to verify'),
-        idempotencyKey: z.string().optional().describe('A unique idempotency key for this request'),
-    }),
-    graphqlQuery: `
-    mutation VerifyIndividual($input: VerifyIndividualInput!) {
-      verifyIndividual(input: $input) {
-        ... on VerifyIndividualResult {
-          individual {
-            id
-            name {
-              firstName
-              middleName
-              lastName
-            }
-            address {
-              addressLine1
-              addressLine2
-              city
-              state
-              country
-              zip
-            }
-            mailingAddress {
-              addressLine1
-              addressLine2
-              city
-              state
-              country
-              zip
-            }
-            phoneNumber
-            email
-            tin
-            dateOfBirth
-            language
-            verifications {
-              id
-              status
-              verificationCodes
-            }
-          }
-          verification {
-            id
-            status
-            verificationCodes
-          }
-        }
-        ... on BadRequestError {
-          code
-          message
-        }
-        ... on InternalServerError {
-          code
-          message
-        }
-      }
-    }
-  `,
-    resultPath: 'verifyIndividual',
-};
-
-// Mutations - Enroll Individual in Benefit
-export const enrollIndividualInBenefit: ToolDefinition = {
-    name: 'enroll_individual_in_benefit',
-    description: 'Enroll an individual in a benefit program',
-    category: 'Benefits',
-    inputSchema: z.object({
-        benefitId: z.string().describe('The ID of the benefit to enroll the individual in'),
-        individualId: z.string().describe('The ID of the individual to enroll'),
-        verificationId: z
-            .string()
-            .optional()
-            .describe('The ID of a verification (for benefits requiring verification)'),
-        startDate: z.string().optional().describe('Start date of enrollment in YYYY-MM-DD format'),
-        endDate: z.string().optional().describe('End date of enrollment in YYYY-MM-DD format'),
-        employeeInitialContributionAmount: z
-            .number()
-            .optional()
-            .describe('Initial contribution amount from employee in dollars'),
-        employerInitialContributionAmount: z
-            .number()
-            .optional()
-            .describe('Initial contribution amount from employer in dollars'),
-        employeeRecurringContributionAmount: z
-            .number()
-            .optional()
-            .describe('Recurring contribution amount from employee in dollars'),
-        employerRecurringContributionAmount: z
-            .number()
-            .optional()
-            .describe('Recurring contribution amount from employer in dollars'),
-    }),
-    graphqlQuery: `
-    mutation EnrollIndividualInBenefit($input: EnrollIndividualInBenefitInput!) {
-      enrollIndividualInBenefit(input: $input) {
-        ... on EnrollIndividualInBenefitResult {
-          benefit {
-            id
-            name
-            description
-            type
-            startDate
-            endDate
-            configuration {
-              funding {
-                limits {
-                  individual {
-                    amount
-                    currency
-                  }
-                }
-                initialFunding {
-                  individual {
-                    amount
-                    currency
-                  }
-                }
-              }
-            }
-          }
-          individual {
-            id
-            name {
-              firstName
-              middleName
-              lastName
-            }
-            address {
-              addressLine1
-              addressLine2
-              city
-              state
-              country
-              zip
-            }
-            mailingAddress {
-              addressLine1
-              addressLine2
-              city
-              state
-              country
-              zip
-            }
-            phoneNumber
-            email
-            tin
-            dateOfBirth
-            language
-            verifications {
-              id
-              status
-              verificationCodes
-            }
-          }
-        }
-        ... on BadRequestError {
-          code
-          message
-        }
-        ... on InternalServerError {
-          code
-          message
-        }
-      }
-    }
-  `,
-    resultPath: 'enrollIndividualInBenefit',
-};
-
-// Utility
-export const ping: ToolDefinition = {
-    name: 'ping',
-    description: 'Test the API connection',
-    category: 'Utilities',
-    inputSchema: z.object({}),
-    graphqlQuery: `
-    query Ping {
-      ping
-    }
-  `,
-    resultPath: 'ping',
+    resultPath: 'unenrollParticipantFromOfferings',
 };
 
 // All tools registry
@@ -732,21 +657,24 @@ export const tools: ToolDefinition[] = [
     // Organizations
     listOrganizations,
     getOrganization,
-    createOrganization,
-    // Individuals
-    listIndividuals,
-    getIndividual,
-    createIndividual,
-    updateIndividual,
-    verifyIndividual,
+    listOrganizationMembers,
+    // Users
+    listUsers,
+    getUserDetails,
+    bulkCreateIndividuals,
     // Benefits
     listBenefitsPrograms,
-    getBenefitsProgram,
-    getBenefit,
-    listBenefitTemplates,
-    enrollIndividualInBenefit,
-    // Utilities
-    ping,
+    listOfferingTemplates,
+    createOrReturnRootBenefitsProgram,
+    createBenefitsOffering,
+    // Enrollments
+    bulkEnrollInOfferings,
+    unenrollParticipantFromOfferings,
+    // Claims
+    listClaims,
+    // Partner/Administrator
+    getCurrentPartner,
+    getCurrentAdministrator,
 ];
 
 export const toolsByCategory = tools.reduce(

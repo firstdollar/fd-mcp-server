@@ -14,8 +14,8 @@ REGION="us-central1"
 SERVICE_NAME="fd-mcp-web"
 IMAGE_NAME="${REGION}-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/${SERVICE_NAME}:latest"
 
-# Partner API URL for tool execution
-PARTNER_API_URL="${PARTNER_API_URL:-https://api.dev.firstdollar.com}"
+# Manager API URL for web UI chat
+MANAGER_API_URL="${MANAGER_API_URL:-https://manager.dev.firstdollar.com}"
 
 echo "=========================================="
 echo "Deploying MCP Web UI to Cloud Run"
@@ -23,7 +23,7 @@ echo "=========================================="
 echo "Project:      ${PROJECT_ID}"
 echo "Region:       ${REGION}"
 echo "Service:      ${SERVICE_NAME}"
-echo "Partner API:  ${PARTNER_API_URL}"
+echo "Manager API:  ${MANAGER_API_URL}"
 echo "=========================================="
 
 # Navigate to repo root
@@ -53,7 +53,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --cpu 1 \
     --min-instances 0 \
     --max-instances 10 \
-    --set-env-vars "NODE_ENV=production,API_URL=${PARTNER_API_URL},NEXT_PUBLIC_API_URL=${PARTNER_API_URL}"
+    --set-env-vars "NODE_ENV=production,MANAGER_API_URL=${MANAGER_API_URL}"
 
 # Get the service URL
 SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" --region "${REGION}" --format 'value(status.url)')

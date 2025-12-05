@@ -1,13 +1,12 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import {
   User,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   onAuthStateChanged,
-  signInWithCustomToken,
   MultiFactorResolver,
   PhoneAuthProvider,
   PhoneMultiFactorGenerator,
@@ -16,16 +15,8 @@ import {
   MultiFactorError,
   RecaptchaVerifier,
 } from 'firebase/auth';
-import { auth, getPartnerApiAuth } from './firebase';
+import { auth } from './firebase';
 
-interface PartnerApiToken {
-  /** The Partner API ID token */
-  token: string;
-  /** When the token was obtained */
-  obtainedAt: number;
-  /** The partner code this token is for */
-  partnerCode: string;
-}
 
 /** MFA state when second factor is required */
 interface MfaState {
@@ -50,14 +41,8 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
-  /** Gets the admin's Firebase ID token (for admin-level operations) */
+  /** Gets the user's Firebase ID token (for API calls) */
   getIdToken: () => Promise<string | null>;
-  /** Gets a Partner API token for making Partner API calls */
-  getPartnerApiToken: () => Promise<string | null>;
-  /** The current partner code (if available) */
-  partnerCode: string | null;
-  /** Error from Partner API token exchange (if any) */
-  partnerApiError: string | null;
   /** MFA state when multi-factor auth is required */
   mfaState: MfaState | null;
   /** Send MFA verification code (for phone-based MFA) */
@@ -70,14 +55,9 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Token is considered valid for 55 minutes (Firebase tokens expire in 1 hour)
-const TOKEN_VALIDITY_MS = 55 * 60 * 1000;
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [partnerApiToken, setPartnerApiToken] = useState<PartnerApiToken | null>(null);
-  const [partnerApiError, setPartnerApiError] = useState<string | null>(null);
   const [mfaState, setMfaState] = useState<MfaState | null>(null);
   const [recaptchaVerifier, setRecaptchaVerifier] = useState<RecaptchaVerifier | null>(null);
 
@@ -86,11 +66,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(user);
       setLoading(false);
 
-      // Clear state when user changes
-      if (!user) {
-        setPartnerApiToken(null);
-        setPartnerApiError(null);
-      } else {
+      // Clear MFA state when user signs in
+      if (user) {
         setMfaState(null);
       }
     });
@@ -137,11 +114,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     try {
       await firebaseSignOut(auth);
-      // Also sign out from Partner API auth
-      const partnerAuth = getPartnerApiAuth();
-      await firebaseSignOut(partnerAuth);
-      setPartnerApiToken(null);
-      setPartnerApiError(null);
       setMfaState(null);
     } catch (error) {
       throw error;
@@ -257,78 +229,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  /**
-   * Gets a Partner API token by:
-   * 1. Calling the MCP token exchange endpoint with the admin's token
-   * 2. Exchanging the custom token for an ID token using a secondary Firebase app
-   * 3. Caching the token for subsequent calls
-   *
-   * The secondary Firebase app allows us to maintain the admin's auth state
-   * while also authenticating as the Partner API user.
-   */
-  const getPartnerApiToken = useCallback(async (): Promise<string | null> => {
-    if (!user) return null;
-
-    // Return cached token if still valid
-    if (
-      partnerApiToken &&
-      Date.now() - partnerApiToken.obtainedAt < TOKEN_VALIDITY_MS
-    ) {
-      return partnerApiToken.token;
-    }
-
-    try {
-      setPartnerApiError(null);
-
-      // Step 1: Get admin's ID token
-      const adminToken = await user.getIdToken();
-      if (!adminToken) {
-        throw new Error('Failed to get admin token');
-      }
-
-      // Step 2: Call the token exchange endpoint
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.dev.firstdollar.com';
-
-      const exchangeResponse = await fetch(`${apiUrl}/mcp/token-exchange`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ idToken: adminToken }),
-      });
-
-      if (!exchangeResponse.ok) {
-        const errorData = await exchangeResponse.json().catch(() => ({}));
-        throw new Error(errorData.error || `Token exchange failed: ${exchangeResponse.status}`);
-      }
-
-      const { customToken, partnerCode } = await exchangeResponse.json();
-
-      // Step 3: Exchange custom token for ID token using the SECONDARY Firebase app
-      // This preserves the admin's auth state in the primary app
-      const partnerAuth = getPartnerApiAuth();
-      const userCredential = await signInWithCustomToken(partnerAuth, customToken);
-      const partnerIdToken = await userCredential.user.getIdToken();
-
-      // Cache the Partner API token
-      const newToken: PartnerApiToken = {
-        token: partnerIdToken,
-        obtainedAt: Date.now(),
-        partnerCode,
-      };
-      setPartnerApiToken(newToken);
-
-      console.log(`Partner API token obtained for partner: ${partnerCode}`);
-
-      return partnerIdToken;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to get Partner API token';
-      console.error('Partner API token error:', error);
-      setPartnerApiError(errorMessage);
-      return null;
-    }
-  }, [user, partnerApiToken]);
-
   return (
     <AuthContext.Provider
       value={{
@@ -338,9 +238,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signUp,
         signOut,
         getIdToken,
-        getPartnerApiToken,
-        partnerCode: partnerApiToken?.partnerCode ?? null,
-        partnerApiError,
         mfaState,
         sendMfaCode,
         verifyMfaCode,

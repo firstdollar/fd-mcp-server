@@ -16,7 +16,7 @@ interface ToolResult {
 }
 
 export default function DashboardPage() {
-  const { getPartnerApiToken, partnerApiError } = useAuth();
+  const { getIdToken } = useAuth();
   const [selectedTool, setSelectedTool] = useState<ToolDefinition | null>(null);
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [result, setResult] = useState<ToolResult | null>(null);
@@ -39,9 +39,9 @@ export default function DashboardPage() {
     setResult(null);
 
     try {
-      const token = await getPartnerApiToken();
+      const token = await getIdToken();
       if (!token) {
-        setResult({ success: false, error: partnerApiError || 'Failed to get Partner API token' });
+        setResult({ success: false, error: 'Failed to get authentication token' });
         return;
       }
 

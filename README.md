@@ -4,14 +4,17 @@ Exposes First Dollar Partner APIs to AI agents via the Model Context Protocol (M
 
 ## Components
 
-1. **MCP Server** (Express, port 8080) - Streamable HTTP endpoint for AI agents
-2. **Web UI** (Next.js, port 3000) - Dashboard for humans to execute tools and chat
+1. **MCP Server** (Express, port 3001) - Streamable HTTP endpoint for AI agents (Claude Desktop)
+2. **Web UI** (Next.js, port 3000) - Dashboard with chat interface for humans
 
 ## Quick Start
 
 ```bash
 # Install dependencies
 npm install
+
+# Copy environment file and add your Anthropic API key
+cp .env.example .env.local
 
 # Development
 npm run dev          # Web UI on :3000
@@ -33,15 +36,11 @@ npm run start        # Web UI
 ./deploy-web.sh first-dollar-hackathon
 ```
 
-## MCP Client Configuration
+## MCP Client Configuration (Claude Desktop)
 
-The MCP server supports two authentication methods.
+The MCP server uses API key authentication. Use your Partner API credentials (clientId:clientSecret) as an API key.
 
 > **Note:** The MCP server and token exchange endpoints are currently only available in development and staging environments. Production access is not yet enabled.
-
-### Option 1: API Key Authentication (Recommended for Claude Desktop)
-
-Use your Partner API credentials (clientId:clientSecret) as an API key. This is the recommended approach for headless clients like Claude Desktop that don't support browser-based OAuth flows.
 
 **Claude Desktop Configuration** (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
 
@@ -49,7 +48,7 @@ Use your Partner API credentials (clientId:clientSecret) as an API key. This is 
 {
   "mcpServers": {
     "fd-partner-api": {
-      "url": "https://mcp.dev.firstdollar.com/mcp",
+      "url": "https://mcp.dev.firstdollar.com/mcp/partner",
       "transport": "streamable-http",
       "headers": {
         "X-API-Key": "your-client-id@partner.firstdollar.com:your-client-secret"
@@ -60,48 +59,35 @@ Use your Partner API credentials (clientId:clientSecret) as an API key. This is 
 ```
 
 **Environment-specific URLs:**
-- Development: `https://mcp.dev.firstdollar.com/mcp`
-- Staging: `https://mcp.staging.firstdollar.com/mcp`
+- Development: `https://mcp.dev.firstdollar.com/mcp/partner`
+- Staging: `https://mcp.staging.firstdollar.com/mcp/partner`
 - Production: Not yet available
 
-### Option 2: Bearer Token Authentication (For Web UI)
+## Web UI Chat
 
-If you have a Firebase ID token (e.g., from the web UI authentication flow), you can use it directly:
-
-```json
-{
-  "mcpServers": {
-    "fd-partner-api": {
-      "url": "https://mcp.firstdollar.com/mcp",
-      "transport": "streamable-http",
-      "headers": {
-        "Authorization": "Bearer YOUR_FIREBASE_ID_TOKEN"
-      }
-    }
-  }
-}
-```
-
-Note: Firebase tokens expire after 1 hour. For long-running sessions, use API key authentication.
+The web UI chat interface authenticates users via Firebase and makes requests to the Manager API. Users see data based on their actual permissions (org admin, partner admin, etc.).
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `PARTNER_API_URL` | Partner GraphQL API endpoint | `https://api.dev.firstdollar.com` |
-| `FD_BACKEND_API_URL` | Backend API for token exchange | `https://api.dev.firstdollar.com` |
-| `MCP_PORT` | MCP server port | `3001` (dev) / `8080` (prod) |
+| `ANTHROPIC_API_KEY` | **Required** for web UI chat | - |
+| `PARTNER_API_URL` | Partner GraphQL API (MCP server) | `https://api.dev.firstdollar.com` |
+| `FD_BACKEND_API_URL` | Backend API for API key exchange | `https://api.dev.firstdollar.com` |
+| `MANAGER_API_URL` | Manager GraphQL API (web UI chat) | `https://manager.dev.firstdollar.com` |
+| `MCP_PORT` | MCP server port | `3001` |
 | `MCP_HOST` | MCP server bind address | `0.0.0.0` |
-| `ANTHROPIC_API_KEY` | For chat functionality | - |
 
 ## Available Tools
 
-- `search_organizations` - Search for organizations
+- `list_organizations` - List organizations
 - `get_organization` - Get organization details
-- `list_benefit_offerings` - List benefit offerings for an organization
-- `search_users` - Search for users
-- `get_user` - Get user details
-- `get_user_benefits` - Get user's benefits
+- `list_individuals` - List individuals
+- `get_individual` - Get individual details
+- `create_individual` - Create a new individual
+- `update_individual` - Update an individual
+- `list_benefits_programs` - List benefits programs
+- `enroll_individual_in_benefit` - Enroll an individual in a benefit
 - And more...
 
 See `src/lib/tools/definitions.ts` for the complete list.

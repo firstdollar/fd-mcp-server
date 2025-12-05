@@ -1,10 +1,7 @@
 /**
  * Authentication module for MCP Server
  *
- * Supports two authentication methods:
- * 1. Bearer token (Firebase ID token) - for web UI and authenticated users
- * 2. API key (X-API-Key header) - for Claude Desktop and other API clients
- *
+ * Supports API key authentication (X-API-Key header) for Claude Desktop and other API clients.
  * API keys are exchanged for Partner API tokens via the fd-backend token exchange endpoint.
  */
 
@@ -13,28 +10,15 @@ import type { Request } from 'express';
 const FD_BACKEND_API_URL = process.env.FD_BACKEND_API_URL || 'https://api.dev.firstdollar.com';
 
 export interface AuthResult {
-    /** The Partner API token to use for GraphQL queries */
+    /** The API token to use for GraphQL queries */
     token: string;
-    /** The authentication method used */
-    method: 'bearer' | 'api-key';
-    /** The partner code (only available for API key auth) */
-    partnerCode?: string;
+    /** The partner code */
+    partnerCode: string;
 }
 
 export interface AuthError {
     code: number;
     message: string;
-}
-
-/**
- * Extract Bearer token from Authorization header
- */
-function extractBearerToken(req: Request): string | null {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return null;
-    }
-    return authHeader.substring(7);
 }
 
 /**
@@ -114,44 +98,31 @@ async function exchangeApiKeyForToken(
 }
 
 /**
- * Authenticate a request using either Bearer token or API key
+ * Authenticate a request using API key
  *
  * @param req - Express request object
  * @returns AuthResult on success, AuthError on failure
  */
-export async function authenticateRequest(
-    req: Request,
-): Promise<AuthResult | AuthError> {
-    // Try Bearer token first (for web UI users)
-    const bearerToken = extractBearerToken(req);
-    if (bearerToken) {
-        return {
-            token: bearerToken,
-            method: 'bearer',
-        };
-    }
-
-    // Try API key (for Claude Desktop and other API clients)
+export async function authenticateRequest(req: Request): Promise<AuthResult | AuthError> {
     const apiKey = extractApiKey(req);
-    if (apiKey) {
-        const result = await exchangeApiKeyForToken(apiKey);
-        if (result) {
-            return {
-                token: result.token,
-                method: 'api-key',
-                partnerCode: result.partnerCode,
-            };
-        }
+    if (!apiKey) {
         return {
             code: -32000,
-            message: 'Invalid API key',
+            message: 'Unauthorized: X-API-Key header required',
         };
     }
 
-    // No authentication provided
+    const result = await exchangeApiKeyForToken(apiKey);
+    if (result) {
+        return {
+            token: result.token,
+            partnerCode: result.partnerCode,
+        };
+    }
+
     return {
         code: -32000,
-        message: 'Unauthorized: Bearer token or X-API-Key required',
+        message: 'Invalid API key',
     };
 }
 

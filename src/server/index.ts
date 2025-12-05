@@ -4,7 +4,8 @@
  * Express-based MCP server implementing the Streamable HTTP transport
  * per the MCP specification (2025-06-18).
  *
- * This server exposes Partner API operations as MCP tools for AI agents.
+ * This server exposes Partner API tools via the /mcp/partner endpoint
+ * with API key authentication for Claude Desktop and other MCP clients.
  */
 
 // Load environment variables from .env.local (for local development)
@@ -23,18 +24,11 @@ import { authenticateRequest, isAuthError, getTokenCacheSize } from './auth.js';
 const PORT = parseInt(process.env.MCP_PORT || '3001', 10);
 const HOST = process.env.MCP_HOST || '0.0.0.0';
 
-// Store active transports by session ID
+// Session storage
 const transports: Record<string, StreamableHTTPServerTransport> = {};
-
-// Store token per session for tool execution
 const sessionTokens: Record<string, string> = {};
 
-// Store auth method per session for logging
-const sessionAuthMethods: Record<string, 'bearer' | 'api-key'> = {};
-
-// Create Express app with MCP defaults (includes DNS rebinding protection for localhost)
-// Note: allowedHosts only accepts strings, so we need to list specific domains
-// or disable DNS rebinding protection for production Cloud Run deployments
+// Create Express app with MCP defaults
 const allowedHosts = [
     'localhost',
     '127.0.0.1',
@@ -43,20 +37,11 @@ const allowedHosts = [
     'mcp.firstdollar.com',
 ];
 
-// In production (Cloud Run), add the Cloud Run domain from environment
-// Cloud Run sets K_SERVICE and K_REVISION environment variables
-if (process.env.K_SERVICE) {
-    // Allow any host in Cloud Run (it handles its own security)
-    // We'll validate hosts ourselves if needed
-}
-
 const app = createMcpExpressApp({
     host: HOST,
     // If running in Cloud Run, disable host checking (Cloud Run handles security)
-    // Otherwise use our allowedHosts list
     ...(process.env.K_SERVICE ? {} : { allowedHosts }),
 });
-
 
 /**
  * Create and configure a new MCP server instance
@@ -67,23 +52,21 @@ function createMcpServer(token: string): McpServer {
         version: '1.0.0',
     });
 
-    // Register all Partner API tools
+    // Register Partner API tools
     registerTools(server, token);
 
     return server;
 }
 
+// ============================================================================
+// MCP Endpoint (/mcp/partner)
+// Uses API key authentication for Claude Desktop and other headless clients
+// ============================================================================
+
 /**
- * POST /mcp - Main MCP endpoint for JSON-RPC messages
- *
- * Handles both new session initialization and existing session messages.
- * Supports Streamable HTTP with optional SSE for streaming responses.
- *
- * Authentication methods:
- * - Bearer token (Authorization: Bearer <token>) - for web UI
- * - API key (X-API-Key: <key>) - for Claude Desktop and API clients
+ * POST /mcp/partner - Handle MCP requests
  */
-app.post('/mcp', async (req: Request, res: Response) => {
+app.post('/mcp/partner', async (req: Request, res: Response) => {
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
     // Authenticate the request
@@ -101,7 +84,7 @@ app.post('/mcp', async (req: Request, res: Response) => {
         return;
     }
 
-    const { token, method: authMethod } = authResult;
+    const { token } = authResult;
 
     try {
         let transport: StreamableHTTPServerTransport;
@@ -115,11 +98,9 @@ app.post('/mcp', async (req: Request, res: Response) => {
                 sessionIdGenerator: () => randomUUID(),
                 enableJsonResponse: true,
                 onsessioninitialized: (newSessionId) => {
-                    // Store the transport, token, and auth method once session is initialized
                     transports[newSessionId] = transport;
                     sessionTokens[newSessionId] = token;
-                    sessionAuthMethods[newSessionId] = authMethod;
-                    console.log(`[MCP] New session initialized: ${newSessionId} (auth: ${authMethod})`);
+                    console.log(`[MCP] New session initialized: ${newSessionId}`);
                 },
             });
 
@@ -129,7 +110,6 @@ app.post('/mcp', async (req: Request, res: Response) => {
                 if (sid) {
                     delete transports[sid];
                     delete sessionTokens[sid];
-                    delete sessionAuthMethods[sid];
                     console.log(`[MCP] Session closed: ${sid}`);
                 }
             };
@@ -138,7 +118,6 @@ app.post('/mcp', async (req: Request, res: Response) => {
             const server = createMcpServer(token);
             await server.connect(transport);
         } else if (sessionId && !transports[sessionId]) {
-            // Session expired or invalid
             res.status(400).json({
                 jsonrpc: '2.0',
                 error: {
@@ -149,7 +128,6 @@ app.post('/mcp', async (req: Request, res: Response) => {
             });
             return;
         } else {
-            // No session ID and not an initialize request
             res.status(400).json({
                 jsonrpc: '2.0',
                 error: {
@@ -161,7 +139,6 @@ app.post('/mcp', async (req: Request, res: Response) => {
             return;
         }
 
-        // Handle the request through the transport
         await transport.handleRequest(req, res, req.body);
     } catch (error) {
         console.error('[MCP] Error handling request:', error);
@@ -179,12 +156,9 @@ app.post('/mcp', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /mcp - SSE endpoint for server-to-client streaming
- *
- * Allows clients to receive server-sent events for long-running operations.
- * Supports resumability via Last-Event-ID header.
+ * GET /mcp/partner - Handle SSE connections
  */
-app.get('/mcp', async (req: Request, res: Response) => {
+app.get('/mcp/partner', async (req: Request, res: Response) => {
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
     if (!sessionId || !transports[sessionId]) {
@@ -219,11 +193,9 @@ app.get('/mcp', async (req: Request, res: Response) => {
 });
 
 /**
- * DELETE /mcp - Session termination endpoint
- *
- * Allows clients to explicitly close their session per MCP specification.
+ * DELETE /mcp/partner - Close a session
  */
-app.delete('/mcp', async (req: Request, res: Response) => {
+app.delete('/mcp/partner', async (req: Request, res: Response) => {
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
     if (!sessionId || !transports[sessionId]) {
@@ -244,7 +216,6 @@ app.delete('/mcp', async (req: Request, res: Response) => {
         await transport.close();
         delete transports[sessionId];
         delete sessionTokens[sessionId];
-        delete sessionAuthMethods[sessionId];
         console.log(`[MCP] Session terminated by client: ${sessionId}`);
         res.status(204).send();
     } catch (error) {
@@ -260,6 +231,10 @@ app.delete('/mcp', async (req: Request, res: Response) => {
     }
 });
 
+// ============================================================================
+// Utility Endpoints
+// ============================================================================
+
 /**
  * GET /health - Health check endpoint
  */
@@ -270,7 +245,7 @@ app.get('/health', (_req: Request, res: Response) => {
         version: '1.0.0',
         protocol: 'MCP',
         protocolVersion: '2025-06-18',
-        activeSessions: Object.keys(transports).length,
+        sessions: Object.keys(transports).length,
         cachedApiKeys: getTokenCacheSize(),
     });
 });
@@ -282,29 +257,34 @@ app.get('/', (_req: Request, res: Response) => {
     res.json({
         name: 'fd-mcp-server',
         version: '1.0.0',
-        description: 'First Dollar Partner API MCP Server',
+        description: 'First Dollar MCP Server',
         protocol: 'MCP',
         protocolVersion: '2025-06-18',
         transport: 'Streamable HTTP',
         endpoints: {
-            mcp: '/mcp',
+            mcp: {
+                path: '/mcp/partner',
+                description: 'MCP endpoint (API key auth)',
+                methods: ['POST', 'GET', 'DELETE'],
+            },
             health: '/health',
         },
         documentation: 'https://developer.firstdollar.com',
     });
 });
 
-// Graceful shutdown
+// ============================================================================
+// Graceful Shutdown
+// ============================================================================
+
 process.on('SIGINT', async () => {
     console.log('\n[MCP] Shutting down...');
 
-    // Close all active transports
     for (const [sessionId, transport] of Object.entries(transports)) {
         try {
             await transport.close();
             delete transports[sessionId];
             delete sessionTokens[sessionId];
-            delete sessionAuthMethods[sessionId];
             console.log(`[MCP] Closed session: ${sessionId}`);
         } catch (error) {
             console.error(`[MCP] Error closing session ${sessionId}:`, error);
@@ -314,7 +294,10 @@ process.on('SIGINT', async () => {
     process.exit(0);
 });
 
-// Start server
+// ============================================================================
+// Start Server
+// ============================================================================
+
 app.listen(PORT, HOST, () => {
     console.log(`
 ╔═══════════════════════════════════════════════════════════╗
@@ -327,10 +310,8 @@ app.listen(PORT, HOST, () => {
 ║  Version:   2025-06-18                                    ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  Endpoints:                                               ║
-║    POST   /mcp     - JSON-RPC messages                    ║
-║    GET    /mcp     - SSE streaming                        ║
-║    DELETE /mcp     - Session termination                  ║
-║    GET    /health  - Health check                         ║
+║    /mcp/partner  - MCP endpoint (API key auth)            ║
+║    /health       - Health check                           ║
 ╚═══════════════════════════════════════════════════════════╝
     `);
 });

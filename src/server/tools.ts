@@ -2,11 +2,12 @@
  * MCP Tool Registration
  *
  * Registers Partner API tools with the MCP server using the official SDK.
- * Tools are defined in ../lib/tools/definitions.ts and registered using Zod schemas.
+ * Tools are defined in ../lib/tools/partner-definitions.ts for Partner API (Claude Desktop).
+ * Manager API tools are in ../lib/tools/definitions.ts for Web UI.
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { tools, type ToolDefinition } from '../lib/tools/definitions.js';
+import { partnerTools, type PartnerToolDefinition } from '../lib/tools/partner-definitions.js';
 
 const PARTNER_API_URL = process.env.PARTNER_API_URL || 'https://api.dev.firstdollar.com';
 
@@ -31,19 +32,97 @@ async function executeGraphQL(
 }
 
 /**
+ * Transform query arguments for Partner API queries
+ * Partner API uses `where` for filtering, `after`/`first` for pagination
+ */
+function transformQueryArgs(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+
+    switch (toolName) {
+        case 'list_organizations': {
+            if (args.ids && (args.ids as string[]).length > 0) {
+                result.where = { ids: args.ids };
+            }
+            if (args.after) result.after = args.after;
+            if (args.first) result.first = args.first;
+            return result;
+        }
+
+        case 'get_organization': {
+            return {
+                where: { id: args.id },
+            };
+        }
+
+        case 'list_individuals': {
+            const where: Record<string, unknown> = {};
+            if (args.ids && (args.ids as string[]).length > 0) where.ids = args.ids;
+            if (args.organizationIds && (args.organizationIds as string[]).length > 0)
+                where.organizationIds = args.organizationIds;
+            if (args.benefitIds && (args.benefitIds as string[]).length > 0) where.benefitIds = args.benefitIds;
+            if (args.benefitsProgramIds && (args.benefitsProgramIds as string[]).length > 0)
+                where.benefitsProgramIds = args.benefitsProgramIds;
+            if (args.statuses && (args.statuses as string[]).length > 0) where.statuses = args.statuses;
+
+            if (Object.keys(where).length > 0) result.where = where;
+            if (args.after) result.after = args.after;
+            if (args.first) result.first = args.first;
+            return result;
+        }
+
+        case 'list_benefits_programs': {
+            if (args.organizationIds && (args.organizationIds as string[]).length > 0) {
+                result.where = { organizationIds: args.organizationIds };
+            }
+            if (args.after) result.after = args.after;
+            if (args.first) result.first = args.first;
+            return result;
+        }
+
+        case 'list_benefit_templates': {
+            // Templates don't typically need where clause
+            if (args.after) result.after = args.after;
+            if (args.first) result.first = args.first;
+            return result;
+        }
+
+        default:
+            return args;
+    }
+}
+
+/**
  * Transform flat tool arguments into nested GraphQL input structure
  *
  * Some tools (like createIndividual, updateIndividual) have flat input schemas
  * but need nested structures for GraphQL mutations.
+ * Partner API uses different query/mutation structures than Manager API.
  */
 function transformArguments(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
+    // Queries that need `where` wrapper for filtering
+    const queriesNeedingWhereWrapper = [
+        'list_organizations',
+        'get_organization',
+        'list_individuals',
+        'list_benefits_programs',
+        'list_benefit_templates',
+    ];
+
+    // Handle query transformations
+    if (queriesNeedingWhereWrapper.includes(toolName)) {
+        return transformQueryArgs(toolName, args);
+    }
+
     // Mutations that need `input` wrapper
     const mutationsNeedingInputWrapper = [
+        'ping',
         'create_organization',
         'create_individual',
         'update_individual',
         'verify_individual',
         'enroll_individual_in_benefit',
+        'create_benefits_program',
+        'create_benefit',
     ];
 
     if (!mutationsNeedingInputWrapper.includes(toolName)) {
@@ -194,6 +273,25 @@ function transformArguments(toolName: string, args: Record<string, unknown>): Re
             return { input };
         }
 
+        case 'create_benefits_program':
+            return {
+                input: {
+                    organizationId: args.organizationId,
+                    name: args.name,
+                },
+            };
+
+        case 'create_benefit':
+            return {
+                input: {
+                    benefitsProgramId: args.benefitsProgramId,
+                    templateId: args.templateId,
+                    name: args.name,
+                    startDate: args.startDate,
+                    ...(args.endDate ? { endDate: args.endDate } : {}),
+                },
+            };
+
         default:
             return args;
     }
@@ -217,12 +315,22 @@ function extractResult(data: Record<string, unknown>, path: string): unknown {
     return result;
 }
 
+/** Token can be a string or a getter function for lazy authentication */
+type TokenOrGetter = string | (() => string);
+
+function getToken(tokenOrGetter: TokenOrGetter): string {
+    return typeof tokenOrGetter === 'function' ? tokenOrGetter() : tokenOrGetter;
+}
+
 /**
  * Create a tool handler function for a given tool definition
  */
-function createToolHandler(tool: ToolDefinition, token: string) {
+function createToolHandler(tool: PartnerToolDefinition, tokenOrGetter: TokenOrGetter) {
     return async (args: Record<string, unknown>) => {
         try {
+            // Get token (may throw if not authenticated yet)
+            const token = getToken(tokenOrGetter);
+
             // Transform arguments for GraphQL
             const transformedArgs = transformArguments(tool.name, args);
 
@@ -269,9 +377,11 @@ function createToolHandler(tool: ToolDefinition, token: string) {
 
 /**
  * Register all tools with the MCP server using the new registerTool API
+ * @param server - The MCP server instance
+ * @param tokenOrGetter - Either a token string or a function that returns the token (for lazy auth)
  */
-export function registerTools(server: McpServer, token: string): void {
-    for (const tool of tools) {
+export function registerTools(server: McpServer, tokenOrGetter: TokenOrGetter): void {
+    for (const tool of partnerTools) {
         // Use registerTool with config object and pass the Zod schema directly
         server.registerTool(
             tool.name,
@@ -279,9 +389,9 @@ export function registerTools(server: McpServer, token: string): void {
                 description: tool.description,
                 inputSchema: tool.inputSchema,
             },
-            createToolHandler(tool, token),
+            createToolHandler(tool, tokenOrGetter),
         );
     }
 
-    console.log(`[MCP] Registered ${tools.length} tools`);
+    console.error(`[MCP] Registered ${partnerTools.length} Partner API tools`);
 }
