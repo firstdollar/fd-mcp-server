@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { tools, type ToolDefinition } from './tools/definitions';
+import { tools, getToolsForAdminType, type ToolDefinition, type AdministeredEntityType } from './tools/definitions';
 
 // Lazy initialization of Claude client
 let anthropic: Anthropic | null = null;
@@ -16,7 +16,17 @@ const getAnthropicClient = (): Anthropic => {
     return anthropic;
 };
 
-// Available MCP tools with their descriptions for Claude
+// Get available tools, optionally filtered by admin type
+const getAvailableTools = (adminType?: AdministeredEntityType) => {
+    const filteredTools = adminType ? getToolsForAdminType(adminType) : tools;
+    return filteredTools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        category: tool.category,
+    }));
+};
+
+// Available MCP tools with their descriptions for Claude (all tools, used as fallback)
 const AVAILABLE_TOOLS = tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
@@ -33,13 +43,26 @@ interface ClaudeToolSelection {
 
 /**
  * Uses Claude to intelligently select the appropriate MCP tool based on user message
+ * @param userMessage - The user's message to process
+ * @param adminType - Optional admin type to filter available tools
+ * @param organizationCode - Optional organization code for org-scoped context
  */
-export const selectToolWithClaude = async (userMessage: string): Promise<ClaudeToolSelection> => {
+export const selectToolWithClaude = async (
+    userMessage: string,
+    adminType?: AdministeredEntityType,
+    organizationCode?: string,
+): Promise<ClaudeToolSelection> => {
+    const availableTools = getAvailableTools(adminType);
+
     try {
+        const adminContext = adminType === 'ORGANIZATION' && organizationCode
+            ? `\n\nIMPORTANT: The user is an Organization Admin for organization "${organizationCode}". For any tool that requires an organizationCode or organizationCodes parameter, automatically use "${organizationCode}".`
+            : '';
+
         const systemPrompt = `You are an intelligent tool selector for a First Dollar Health Wallet Manager API. Your job is to analyze user messages and select the most appropriate tool to handle their request.
 
 Available Tools:
-${AVAILABLE_TOOLS.map((tool) => `- ${tool.name}: ${tool.description} (Category: ${tool.category})`).join('\n')}
+${availableTools.map((tool) => `- ${tool.name}: ${tool.description} (Category: ${tool.category})`).join('\n')}${adminContext}
 
 Rules:
 1. Always select exactly one tool that best matches the user's intent
@@ -117,14 +140,14 @@ Respond with a JSON object in this exact format:
             throw new Error(`Failed to parse Claude's JSON response: ${parseError}`);
         }
 
-        // Validate the selected tool exists
-        const toolExists = AVAILABLE_TOOLS.some((tool) => tool.name === selection.tool);
+        // Validate the selected tool exists in the filtered list
+        const toolExists = availableTools.some((tool) => tool.name === selection.tool);
         if (!toolExists) {
-            console.warn(`Claude selected unknown tool: ${selection.tool}. Falling back to get_current_administrator.`);
+            console.warn(`Claude selected unavailable tool: ${selection.tool}. Falling back to get_current_administrator.`);
             return {
                 tool: 'get_current_administrator',
                 params: {},
-                reasoning: `Fallback: Unknown tool "${selection.tool}" was selected`,
+                reasoning: `Fallback: Tool "${selection.tool}" is not available for this admin type`,
                 confidence: 0.5,
             };
         }

@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+/** Admin types that can access tools */
+export type AdministeredEntityType = 'PARTNER' | 'ORGANIZATION';
+
 export interface ToolDefinition {
     name: string;
     description: string;
@@ -7,6 +10,10 @@ export interface ToolDefinition {
     inputSchema: z.ZodObject<z.ZodRawShape>;
     graphqlQuery: string;
     resultPath: string;
+    /** Which admin types can access this tool. If not specified, all types can access. */
+    allowedAdminTypes?: AdministeredEntityType[];
+    /** If true, organizationCode will be auto-filled for org admins */
+    orgScoped?: boolean;
 }
 
 // Organizations - using Manager API schema
@@ -46,6 +53,7 @@ export const listOrganizations: ToolDefinition = {
     }
   `,
     resultPath: 'filteredPartnerOrganizations',
+    allowedAdminTypes: ['PARTNER'],
 };
 
 export const getOrganization: ToolDefinition = {
@@ -74,6 +82,7 @@ export const getOrganization: ToolDefinition = {
     }
   `,
     resultPath: 'filteredPartnerOrganizations',
+    orgScoped: true,
 };
 
 // Organization Members - using Manager API schema
@@ -129,6 +138,7 @@ export const listOrganizationMembers: ToolDefinition = {
     }
   `,
     resultPath: 'filteredPartnerOrganizationMembers',
+    orgScoped: true,
 };
 
 // Users/Individuals - using Manager API schema (filteredPartnerUsers and partnerUserDetails)
@@ -184,6 +194,7 @@ export const listUsers: ToolDefinition = {
     }
   `,
     resultPath: 'filteredPartnerUsers',
+    orgScoped: true,
 };
 
 // PartnerUserDetails has: uid, profile (UserProfile), email, disabled, organizationMemberships, userDetailsAreEditableForKYC
@@ -298,6 +309,7 @@ export const listBenefitsPrograms: ToolDefinition = {
     }
   `,
     resultPath: 'partnerOrganizationBenefitsPrograms',
+    orgScoped: true,
 };
 
 // Offering Templates - using Manager API schema
@@ -335,6 +347,7 @@ export const listOfferingTemplates: ToolDefinition = {
     }
   `,
     resultPath: 'partnerOfferingTemplates',
+    allowedAdminTypes: ['PARTNER'],
 };
 
 // Claims - using Manager API schema
@@ -383,6 +396,7 @@ export const listClaims: ToolDefinition = {
     }
   `,
     resultPath: 'partnerListClaimsForReimbursement',
+    orgScoped: true,
 };
 
 // Current Partner - using Manager API schema
@@ -401,6 +415,7 @@ export const getCurrentPartner: ToolDefinition = {
     }
   `,
     resultPath: 'currentPartner',
+    allowedAdminTypes: ['PARTNER'],
 };
 
 // Current Administrator Details - using Manager API schema
@@ -464,6 +479,7 @@ export const createOrReturnRootBenefitsProgram: ToolDefinition = {
     }
   `,
     resultPath: 'partnerCreateOrReturnRootBenefitsProgram',
+    allowedAdminTypes: ['PARTNER'],
 };
 
 // Create Benefits Offering - using Manager API schema
@@ -500,6 +516,7 @@ export const createBenefitsOffering: ToolDefinition = {
     }
   `,
     resultPath: 'partnerCreateBenefitsOffering',
+    allowedAdminTypes: ['PARTNER'],
 };
 
 // Bulk Create Individuals - using Manager API schema
@@ -567,6 +584,7 @@ export const bulkCreateIndividuals: ToolDefinition = {
     }
   `,
     resultPath: 'bulkCreateIndividuals',
+    orgScoped: true,
 };
 
 // Bulk Enroll in Offerings - using Manager API schema
@@ -695,3 +713,38 @@ export const toolByName = tools.reduce(
     },
     {} as Record<string, ToolDefinition>,
 );
+
+/**
+ * Filter tools based on admin type
+ * @param adminType - The type of administrator (PARTNER or ORGANIZATION)
+ * @returns Tools that the admin type can access
+ */
+export function getToolsForAdminType(adminType: AdministeredEntityType): ToolDefinition[] {
+    return tools.filter((tool) => {
+        // If no restrictions, all admin types can access
+        if (!tool.allowedAdminTypes) return true;
+        // Otherwise, check if the admin type is in the allowed list
+        return tool.allowedAdminTypes.includes(adminType);
+    });
+}
+
+/**
+ * Get tools grouped by category, filtered by admin type
+ * @param adminType - The type of administrator (PARTNER or ORGANIZATION)
+ * @returns Tools grouped by category that the admin type can access
+ */
+export function getToolsByCategoryForAdminType(
+    adminType: AdministeredEntityType,
+): Record<string, ToolDefinition[]> {
+    const filteredTools = getToolsForAdminType(adminType);
+    return filteredTools.reduce(
+        (acc, tool) => {
+            if (!acc[tool.category]) {
+                acc[tool.category] = [];
+            }
+            acc[tool.category].push(tool);
+            return acc;
+        },
+        {} as Record<string, ToolDefinition[]>,
+    );
+}

@@ -1,43 +1,33 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { useAuth } from '@/lib/auth-context';
-import { Button } from '@/components/ui/button';
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useAuth } from "@/lib/auth-context";
+import { AdminProvider, useAdmin } from "@/lib/admin-context";
+import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard,
   MessageSquare,
   LogOut,
   Wrench,
-} from 'lucide-react';
+  Building2,
+  Users,
+} from "lucide-react";
 
 const navigation = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'Chat', href: '/dashboard/chat', icon: MessageSquare },
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Chat", href: "/dashboard/chat", icon: MessageSquare },
 ];
 
-export default function DashboardLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const { user, loading, signOut } = useAuth();
-  const router = useRouter();
+function DashboardContent({ children }: { children: React.ReactNode }) {
+  const { user, signOut } = useAuth();
+  const { adminDetails, loading: adminLoading } = useAdmin();
 
-  useEffect(() => {
-    if (!loading && !user) {
-      router.push('/');
-    }
-  }, [user, loading, router]);
+  if (!user) return null;
 
-  if (loading || !user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
+  const adminType = adminDetails?.administeredEntity?.administeredEntityType;
+  const entityName = adminDetails?.administeredEntity?.name;
 
   return (
     <div className="min-h-screen bg-background">
@@ -47,7 +37,7 @@ export default function DashboardLayout({
           <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-violet-500 to-purple-700 flex items-center justify-center">
             <Wrench className="h-4 w-4 text-white" />
           </div>
-          <span className="font-semibold">FD MCP Server</span>
+          <span className="font-semibold text-sm">FD MCP Server Explorer</span>
         </div>
 
         <nav className="flex flex-col gap-1 p-4">
@@ -61,12 +51,31 @@ export default function DashboardLayout({
           ))}
         </nav>
 
+        {/* Admin context info */}
+        {!adminLoading && adminDetails && (
+          <div className="mx-4 p-3 rounded-lg bg-muted/50 border">
+            <div className="flex items-center gap-2 mb-1">
+              {adminType === "PARTNER" ? (
+                <Users className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <Building2 className="h-4 w-4 text-muted-foreground" />
+              )}
+              <span className="text-xs font-medium text-muted-foreground">
+                {adminType === "PARTNER" ? "Partner Admin" : "Org Admin"}
+              </span>
+            </div>
+            <p className="text-sm font-medium truncate" title={entityName}>
+              {entityName}
+            </p>
+          </div>
+        )}
+
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t">
           <div className="flex items-center gap-3 mb-3">
             {user.photoURL ? (
               <img
                 src={user.photoURL}
-                alt={user.displayName || ''}
+                alt={user.displayName || ""}
                 className="h-8 w-8 rounded-full"
               />
             ) : (
@@ -78,7 +87,9 @@ export default function DashboardLayout({
             )}
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">{user.displayName}</p>
-              <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+              <p className="text-xs text-muted-foreground truncate">
+                {user.email}
+              </p>
             </div>
           </div>
           <Button variant="outline" className="w-full gap-2" onClick={signOut}>
@@ -93,5 +104,34 @@ export default function DashboardLayout({
         <main className="p-8">{children}</main>
       </div>
     </div>
+  );
+}
+
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const { user, loading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.push("/");
+    }
+  }, [user, loading, router]);
+
+  if (loading || !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  return (
+    <AdminProvider>
+      <DashboardContent>{children}</DashboardContent>
+    </AdminProvider>
   );
 }

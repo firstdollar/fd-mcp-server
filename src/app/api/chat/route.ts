@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { selectToolWithClaude, generateResponseWithClaude } from '@/lib/claude-client';
-import { toolByName } from '@/lib/tools/definitions';
+import { toolByName, type AdministeredEntityType } from '@/lib/tools/definitions';
 
 /**
  * Transform flat args into the nested structure expected by the Manager API GraphQL queries.
@@ -201,8 +201,45 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Message is required' }, { status: 400 });
         }
 
-        // Step 1: Use Claude to select the appropriate tool
-        const toolSelection = await selectToolWithClaude(message);
+        // Step 0: Fetch admin context to determine available tools
+        const managerApiUrl = process.env.MANAGER_API_URL || 'https://manager.api.dev.firstdollar.com';
+        let adminType: AdministeredEntityType | undefined;
+        let organizationCode: string | undefined;
+
+        try {
+            const adminResponse = await fetch(`${managerApiUrl}/graphql`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    query: `
+                        query GetCurrentAdministrator {
+                            currentAdministratorDetails {
+                                administeredEntity {
+                                    code
+                                    administeredEntityType
+                                }
+                            }
+                        }
+                    `,
+                }),
+            });
+            const adminData = await adminResponse.json();
+            if (adminData.data?.currentAdministratorDetails?.administeredEntity) {
+                const entity = adminData.data.currentAdministratorDetails.administeredEntity;
+                adminType = entity.administeredEntityType as AdministeredEntityType;
+                if (adminType === 'ORGANIZATION') {
+                    organizationCode = entity.code;
+                }
+            }
+        } catch (adminError) {
+            console.warn('Failed to fetch admin context, proceeding without filtering:', adminError);
+        }
+
+        // Step 1: Use Claude to select the appropriate tool (filtered by admin type)
+        const toolSelection = await selectToolWithClaude(message, adminType, organizationCode);
         console.log(`Tool selection: ${toolSelection.tool}`, toolSelection);
 
         const tool = toolByName[toolSelection.tool];
@@ -218,7 +255,6 @@ export async function POST(request: NextRequest) {
 
         // Use Manager API for web UI - users authenticate with their own Firebase tokens
         // which have the correct permissions for their admin role (org admin, partner admin, etc.)
-        const managerApiUrl = process.env.MANAGER_API_URL || 'https://manager.api.dev.firstdollar.com';
         const graphqlResponse = await fetch(`${managerApiUrl}/graphql`, {
             method: 'POST',
             headers: {
