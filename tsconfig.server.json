@@ -16,6 +16,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/server/**/*.ts", "src/lib/tools/definitions.ts"],
+  "include": ["src/server/**/*.ts", "src/lib/tools/definitions.ts", "src/lib/tools/partner-definitions.ts"],
   "exclude": ["node_modules", "dist", ".next"]
 }

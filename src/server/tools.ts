@@ -315,12 +315,22 @@ function extractResult(data: Record<string, unknown>, path: string): unknown {
     return result;
 }
 
+/** Token can be a string or a getter function for lazy authentication */
+type TokenOrGetter = string | (() => string);
+
+function getToken(tokenOrGetter: TokenOrGetter): string {
+    return typeof tokenOrGetter === 'function' ? tokenOrGetter() : tokenOrGetter;
+}
+
 /**
  * Create a tool handler function for a given tool definition
  */
-function createToolHandler(tool: PartnerToolDefinition, token: string) {
+function createToolHandler(tool: PartnerToolDefinition, tokenOrGetter: TokenOrGetter) {
     return async (args: Record<string, unknown>) => {
         try {
+            // Get token (may throw if not authenticated yet)
+            const token = getToken(tokenOrGetter);
+
             // Transform arguments for GraphQL
             const transformedArgs = transformArguments(tool.name, args);
 
@@ -367,8 +377,10 @@ function createToolHandler(tool: PartnerToolDefinition, token: string) {
 
 /**
  * Register all tools with the MCP server using the new registerTool API
+ * @param server - The MCP server instance
+ * @param tokenOrGetter - Either a token string or a function that returns the token (for lazy auth)
  */
-export function registerTools(server: McpServer, token: string): void {
+export function registerTools(server: McpServer, tokenOrGetter: TokenOrGetter): void {
     for (const tool of partnerTools) {
         // Use registerTool with config object and pass the Zod schema directly
         server.registerTool(
@@ -377,9 +389,9 @@ export function registerTools(server: McpServer, token: string): void {
                 description: tool.description,
                 inputSchema: tool.inputSchema,
             },
-            createToolHandler(tool, token),
+            createToolHandler(tool, tokenOrGetter),
         );
     }
 
-    console.log(`[MCP] Registered ${partnerTools.length} Partner API tools`);
+    console.error(`[MCP] Registered ${partnerTools.length} Partner API tools`);
 }
