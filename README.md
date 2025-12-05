@@ -28,6 +28,9 @@ npm run start        # Web UI
 
 ## Deployment (Cloud Run)
 
+Deployments happen automatically via GitHub Actions when you push to `main`. Both the MCP server and Web UI deploy in parallel to Cloud Run.
+
+**Manual deployment** (if needed):
 ```bash
 # Deploy MCP server
 ./deploy.sh first-dollar-hackathon

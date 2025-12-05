@@ -1,8 +1,6 @@
 # MCP Server - CLAUDE.md
 
-**Navigation**: [Root](../../CLAUDE.md) > apps/mcp-server > This Document
-
-This package contains the First Dollar MCP Server - exposing Partner APIs to both human users (via web UI) and AI assistants (via MCP protocol).
+This repository contains the First Dollar MCP Server - exposing Partner APIs to both human users (via web UI) and AI assistants (via MCP protocol).
 
 ## Overview
 
@@ -46,14 +44,16 @@ src/
 │   ├── globals.css         # Tailwind styles
 │   ├── dashboard/          # Dashboard pages
 │   │   ├── layout.tsx      # Sidebar navigation
-│   │   └── page.tsx        # Tool execution UI
-│   ├── chat/               # Chat interface
-│   │   └── page.tsx        # Natural language tool usage
+│   │   ├── page.tsx        # Tool execution UI
+│   │   └── chat/
+│   │       └── page.tsx    # Chat interface for natural language tool usage
 │   └── api/                # API routes
 │       ├── tools/execute/route.ts  # Execute tools via Partner API
 │       └── chat/route.ts           # Chat with Claude + tool execution
 ├── server/                 # Express MCP Server (for AI agents)
-│   ├── index.ts            # Server entry point
+│   ├── index.ts            # HTTP server entry point
+│   ├── stdio.ts            # Stdio transport for Claude Desktop
+│   ├── auth.ts             # API key authentication
 │   └── tools.ts            # Tool registration
 ├── components/             # React components
 │   └── ui/                 # shadcn/ui components
@@ -62,8 +62,10 @@ src/
     ├── firebase.ts         # Firebase initialization
     ├── auth-context.tsx    # Auth provider and hooks
     ├── api-client.ts       # API client for tool execution
+    ├── claude-client.ts    # Anthropic SDK client for chat
     └── tools/
-        └── definitions.ts  # Tool schemas and GraphQL queries (shared)
+        ├── definitions.ts  # Manager API tool schemas (web UI)
+        └── partner-definitions.ts  # Partner API tool schemas (MCP server)
 ```
 
 ## Commands
@@ -110,9 +112,15 @@ The Express-based MCP server implements the **Streamable HTTP** transport per th
 ### Environment Variables
 
 ```bash
-MCP_PORT=3001                           # MCP server port
-MCP_HOST=0.0.0.0                        # Bind address
+# MCP Server
+MCP_PORT=3001                                    # MCP server port
+MCP_HOST=0.0.0.0                                 # Bind address
 PARTNER_API_URL=https://api.dev.firstdollar.com  # Partner API URL
+FD_BACKEND_API_URL=https://api.dev.firstdollar.com  # Backend API for auth
+
+# Web UI
+ANTHROPIC_API_KEY=sk-...                         # Required for chat feature
+MANAGER_API_URL=https://manager.api.dev.firstdollar.com  # Manager API for tools
 ```
 
 ## MCP Client Configuration
@@ -203,18 +211,19 @@ npm run dev          # Web UI on :3000
 npm run dev:mcp      # MCP server on :3001
 ```
 
-### Production (Cloud Run recommended)
+### Production (Cloud Run)
 
+Deployments happen automatically via GitHub Actions when you push to `main`. Both the MCP server and Web UI deploy in parallel to Cloud Run.
+
+See `.github/workflows/deploy.yml` for the deployment configuration.
+
+**Manual deployment** (if needed):
 ```bash
-# Build
-npm run build
-
-# Run MCP server (stateless container)
-npm run start:mcp
+./deploy.sh first-dollar-hackathon      # MCP server
+./deploy-web.sh first-dollar-hackathon  # Web UI
 ```
 
 ## Related Documentation
 
 - [MCP Specification (2025-06-18)](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
-- [Partner API Schema](../../packages/backend/src/schema/partner/generated/schema.graphql)
 - [Streamable HTTP Transport](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http)
