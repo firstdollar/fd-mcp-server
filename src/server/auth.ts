@@ -2,12 +2,13 @@
  * Authentication module for MCP Server
  *
  * Supports API key authentication (X-API-Key header) for Claude Desktop and other API clients.
- * API keys are exchanged for Partner API tokens via the fd-backend token exchange endpoint.
+ * API keys are exchanged for Partner API tokens via the standard OAuth2 client_credentials flow.
  */
 
 import type { Request } from 'express';
 
-const FD_BACKEND_API_URL = process.env.FD_BACKEND_API_URL || 'https://api.dev.firstdollar.com';
+const PARTNER_API_URL = process.env.PARTNER_API_URL || 'https://api.dev.firstdollar.com';
+const OAUTH_TOKEN_PATH = '/v0/auth/token';
 
 export interface AuthResult {
     /** The API token to use for GraphQL queries */
@@ -45,10 +46,20 @@ const tokenCache: Map<string, CachedToken> = new Map();
 const TOKEN_CACHE_TTL_MS = 55 * 60 * 1000;
 
 /**
- * Exchange an API key for a Partner API token
+ * OAuth2 token response from the Partner API
+ */
+interface OAuthTokenResponse {
+    access_token: string;
+    token_type: string;
+    expires_in: number;
+    refresh_token?: string;
+}
+
+/**
+ * Exchange an API key for a Partner API token using OAuth2 client_credentials flow
  *
- * The API key should be a pre-generated token that the fd-backend can validate
- * and exchange for a Partner API user's Firebase token.
+ * The API key should be in the format "clientId:clientSecret" which maps to
+ * the Partner API OAuth credentials.
  */
 async function exchangeApiKeyForToken(
     apiKey: string,
@@ -60,39 +71,67 @@ async function exchangeApiKeyForToken(
         return { token: cached.token, partnerCode: cached.partnerCode };
     }
 
+    // Parse API key (format: clientId:clientSecret)
+    const colonIndex = apiKey.indexOf(':');
+    if (colonIndex === -1) {
+        console.error('[Auth] Invalid API key format. Expected: clientId:clientSecret');
+        return null;
+    }
+
+    const clientId = apiKey.substring(0, colonIndex);
+    const clientSecret = apiKey.substring(colonIndex + 1);
+
+    if (!clientId || !clientSecret) {
+        console.error('[Auth] Invalid API key: missing clientId or clientSecret');
+        return null;
+    }
+
+    // Extract partner code from clientId (format: partner_PARTNERCODE_...)
+    const partnerMatch = clientId.match(/^partner_([^_]+)_/);
+    const partnerCode = partnerMatch ? partnerMatch[1] : 'unknown';
+
     try {
-        const response = await fetch(`${FD_BACKEND_API_URL}/mcp/api-key-exchange`, {
+        const response = await fetch(`${PARTNER_API_URL}${OAUTH_TOKEN_PATH}`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-API-Key': apiKey,
+                'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: JSON.stringify({}),
+            body: new URLSearchParams({
+                grant_type: 'client_credentials',
+                client_id: clientId,
+                client_secret: clientSecret,
+            }).toString(),
         });
 
         if (!response.ok) {
-            console.error(`[Auth] API key exchange failed: ${response.status}`);
+            const errorText = await response.text();
+            console.error(`[Auth] OAuth token request failed: ${response.status} - ${errorText}`);
             return null;
         }
 
-        const data = (await response.json()) as { idToken: string; partnerCode: string };
+        const data = (await response.json()) as OAuthTokenResponse;
 
-        if (!data.idToken || !data.partnerCode) {
-            console.error('[Auth] Invalid response from API key exchange');
+        if (!data.access_token) {
+            console.error('[Auth] Invalid OAuth response: missing access_token');
             return null;
         }
+
+        // Calculate cache expiration (use expires_in from response, default to 55 min)
+        const expiresInMs = (data.expires_in || 3300) * 1000;
+        // Cache for slightly less than expiration to avoid edge cases
+        const cacheExpiresAt = Date.now() + Math.min(expiresInMs - 60000, TOKEN_CACHE_TTL_MS);
 
         // Cache the token
         tokenCache.set(apiKey, {
-            token: data.idToken,
-            partnerCode: data.partnerCode,
-            expiresAt: Date.now() + TOKEN_CACHE_TTL_MS,
+            token: data.access_token,
+            partnerCode,
+            expiresAt: cacheExpiresAt,
         });
 
-        console.log(`[Auth] API key exchanged for token (partner: ${data.partnerCode})`);
-        return { token: data.idToken, partnerCode: data.partnerCode };
+        console.log(`[Auth] OAuth token obtained (partner: ${partnerCode})`);
+        return { token: data.access_token, partnerCode };
     } catch (error) {
-        console.error('[Auth] API key exchange error:', error);
+        console.error('[Auth] OAuth token request error:', error);
         return null;
     }
 }

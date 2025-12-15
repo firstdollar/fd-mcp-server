@@ -115,8 +115,7 @@ The Express-based MCP server implements the **Streamable HTTP** transport per th
 # MCP Server
 MCP_PORT=3001                                    # MCP server port
 MCP_HOST=0.0.0.0                                 # Bind address
-PARTNER_API_URL=https://api.dev.firstdollar.com  # Partner API URL
-FD_BACKEND_API_URL=https://api.dev.firstdollar.com  # Backend API for auth
+PARTNER_API_URL=https://api.dev.firstdollar.com  # Partner API for OAuth auth and GraphQL
 
 # Web UI
 ANTHROPIC_API_KEY=sk-...                         # Required for chat feature

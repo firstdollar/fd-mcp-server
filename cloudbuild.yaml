@@ -50,11 +50,10 @@ steps:
       - '--max-instances'
       - '10'
       - '--set-env-vars'
-      - 'NODE_ENV=production,MCP_PORT=8080,MCP_HOST=0.0.0.0,PARTNER_API_URL=${_PARTNER_API_URL},FD_BACKEND_API_URL=${_FD_BACKEND_API_URL}'
+      - 'NODE_ENV=production,MCP_PORT=8080,MCP_HOST=0.0.0.0,PARTNER_API_URL=${_PARTNER_API_URL}'
 
 substitutions:
   _PARTNER_API_URL: 'https://api.dev.firstdollar.com'
-  _FD_BACKEND_API_URL: 'https://api.dev.firstdollar.com'
 
 options:
   logging: CLOUD_LOGGING_ONLY

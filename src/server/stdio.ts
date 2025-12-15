@@ -8,9 +8,8 @@
  *   node dist/server/stdio.js
  *
  * Environment variables:
- *   FD_API_KEY - Partner API key (required)
- *   FD_BACKEND_API_URL - Backend API URL for token exchange (optional)
- *   PARTNER_API_URL - Partner API URL for GraphQL queries (optional)
+ *   FD_API_KEY - Partner API key in format "clientId:clientSecret" (required)
+ *   PARTNER_API_URL - Partner API URL for OAuth and GraphQL queries (optional)
  *
  * Note: This file avoids dotenv to prevent stdout pollution that breaks MCP protocol.
  * All configuration must be passed via environment variables from Claude Desktop.
@@ -20,44 +19,79 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerTools } from './tools.js';
 
-const FD_BACKEND_API_URL = process.env.FD_BACKEND_API_URL || 'https://api.dev.firstdollar.com';
+const PARTNER_API_URL = process.env.PARTNER_API_URL || 'https://api.dev.firstdollar.com';
+const OAUTH_TOKEN_PATH = '/v0/auth/token';
 
-interface TokenExchangeResponse {
-    idToken: string;
+interface OAuthTokenResponse {
+    access_token: string;
+    token_type: string;
+    expires_in: number;
+    refresh_token?: string;
+}
+
+interface TokenExchangeResult {
+    token: string;
     partnerCode: string;
     expiresIn: number;
 }
 
 /**
- * Exchange an API key for a Partner API token
+ * Exchange an API key for a Partner API token using OAuth2 client_credentials flow
  */
-async function exchangeApiKeyForToken(apiKey: string): Promise<TokenExchangeResponse | null> {
+async function exchangeApiKeyForToken(apiKey: string): Promise<TokenExchangeResult | null> {
+    // Parse API key (format: clientId:clientSecret)
+    const colonIndex = apiKey.indexOf(':');
+    if (colonIndex === -1) {
+        console.error('[Stdio] Invalid API key format. Expected: clientId:clientSecret');
+        return null;
+    }
+
+    const clientId = apiKey.substring(0, colonIndex);
+    const clientSecret = apiKey.substring(colonIndex + 1);
+
+    if (!clientId || !clientSecret) {
+        console.error('[Stdio] Invalid API key: missing clientId or clientSecret');
+        return null;
+    }
+
+    // Extract partner code from clientId (format: partner_PARTNERCODE_...)
+    const partnerMatch = clientId.match(/^partner_([^_]+)_/);
+    const partnerCode = partnerMatch ? partnerMatch[1] : 'unknown';
+
     try {
-        const response = await fetch(`${FD_BACKEND_API_URL}/mcp/api-key-exchange`, {
+        const response = await fetch(`${PARTNER_API_URL}${OAUTH_TOKEN_PATH}`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-API-Key': apiKey,
+                'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: JSON.stringify({}),
+            body: new URLSearchParams({
+                grant_type: 'client_credentials',
+                client_id: clientId,
+                client_secret: clientSecret,
+            }).toString(),
         });
 
         if (!response.ok) {
-            console.error(`[Stdio] API key exchange failed: ${response.status}`);
+            const errorText = await response.text();
+            console.error(`[Stdio] OAuth token request failed: ${response.status} - ${errorText}`);
             return null;
         }
 
-        const data = (await response.json()) as TokenExchangeResponse;
+        const data = (await response.json()) as OAuthTokenResponse;
 
-        if (!data.idToken || !data.partnerCode) {
-            console.error('[Stdio] Invalid response from API key exchange');
+        if (!data.access_token) {
+            console.error('[Stdio] Invalid OAuth response: missing access_token');
             return null;
         }
 
-        console.error(`[Stdio] Authenticated as partner: ${data.partnerCode}`);
-        return data;
+        console.error(`[Stdio] Authenticated as partner: ${partnerCode}`);
+        return {
+            token: data.access_token,
+            partnerCode,
+            expiresIn: data.expires_in,
+        };
     } catch (error) {
-        console.error('[Stdio] API key exchange error:', error);
+        console.error('[Stdio] OAuth token request error:', error);
         return null;
     }
 }
@@ -92,7 +126,7 @@ async function main(): Promise<void> {
         name: 'fd-mcp-server',
         version: '1.0.0',
     });
-    registerTools(server, tokenResult.idToken);
+    registerTools(server, tokenResult.token);
 
     // Stop buffering and connect transport
     process.stdin.off('data', bufferData);
