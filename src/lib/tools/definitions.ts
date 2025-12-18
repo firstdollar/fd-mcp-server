@@ -645,6 +645,59 @@ export const bulkEnrollInOfferings: ToolDefinition = {
     resultPath: 'bulkEnrollInOfferings',
 };
 
+// List Organization Member Benefits - query benefit enrollments for an organization's members
+// Uses filteredPartnerOrganizationMembers to get benefit enrollments
+export const listOrganizationMemberBenefits: ToolDefinition = {
+    name: 'list_organization_member_benefits',
+    description:
+        'List benefit enrollments for members in an organization. Returns enrolled benefits with account balances. Use memberName to filter by a specific member.',
+    category: 'Benefits',
+    inputSchema: z.object({
+        organizationCode: z.string().describe('The organization short code'),
+        memberName: z.string().optional().describe('Filter by member name'),
+        filterByDisabledStatus: z.boolean().optional().describe('Filter by disabled status'),
+        filterByEmploymentStatus: z
+            .string()
+            .optional()
+            .describe('Filter by employment status (EMPLOYED or NOT_EMPLOYED)'),
+        first: z.number().optional().describe('Number of results to return'),
+        after: z.string().optional().describe('Cursor for pagination'),
+    }),
+    graphqlQuery: `
+    query ListBenefits($input: FilteredPartnerOrganizationMembersInput!) {
+      filteredPartnerOrganizationMembers(input: $input) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        members {
+          cursor
+          node {
+            uid
+            name {
+              firstName
+              lastName
+            }
+            externalUserId
+            employeeId
+            benefitOfferingEnrollments {
+              name
+              enrollmentActive
+              accountType
+              accountBalance {
+                amount
+                currency
+              }
+            }
+          }
+        }
+      }
+    }
+  `,
+    resultPath: 'filteredPartnerOrganizationMembers',
+    orgScoped: true,
+};
+
 // Unenroll Participant from Offerings - using Manager API schema
 // unenrollParticipantFromOfferings removes a participant from offerings
 export const unenrollParticipantFromOfferings: ToolDefinition = {
@@ -681,6 +734,7 @@ export const tools: ToolDefinition[] = [
     getUserDetails,
     bulkCreateIndividuals,
     // Benefits
+    listOrganizationMemberBenefits,
     listBenefitsPrograms,
     listOfferingTemplates,
     createOrReturnRootBenefitsProgram,

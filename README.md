@@ -91,3 +91,8 @@ The web UI chat interface authenticates users via Firebase and makes requests to
 - And more...
 
 See `src/lib/tools/definitions.ts` for the complete list.
+
+## TODO - Potential Enhancements
+
+<!-- Add enhancement ideas here -->
+- [ ]

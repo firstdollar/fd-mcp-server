@@ -180,6 +180,22 @@ function transformArgsForTool(toolName: string, args: Record<string, unknown>): 
             };
         }
 
+        case 'list_organization_member_benefits': {
+            const input: Record<string, unknown> = {
+                organizationCode: args.organizationCode,
+            };
+            if (args.memberName) input.memberName = args.memberName;
+            if (args.filterByDisabledStatus !== undefined) input.filterByDisabledStatus = args.filterByDisabledStatus;
+            if (args.filterByEmploymentStatus) input.filterByEmploymentStatus = args.filterByEmploymentStatus;
+            if (args.first || args.after) {
+                input.page = {
+                    ...(args.first ? { first: args.first } : {}),
+                    ...(args.after ? { after: args.after } : {}),
+                };
+            }
+            return { input };
+        }
+
         default:
             return args || {};
     }
